@@ -40,9 +40,9 @@ if device == "cpu":
 
 # Load the ALIGNED data
 print("\n📂 Loading aligned data...")
-with open('aligned_train_data.json', 'r', encoding='utf-8') as f:
+with open('combined_train_data.json', 'r', encoding='utf-8') as f:
     train_data = json.load(f)
-with open('aligned_val_data.json', 'r', encoding='utf-8') as f:
+with open('combined_val_data.json', 'r', encoding='utf-8') as f:
     val_data = json.load(f)
 
 print(f"Train segments: {len(train_data)}")
