@@ -16,8 +16,8 @@ import torch, librosa
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from deep_translator import GoogleTranslator
 
-print("🤖 Loading Hakha Chin Whisper V2...")
-MODEL_PATH = "./whisper-hakha-chin-v2"
+print("🤖 Loading Hakha Chin Whisper Model...")
+MODEL_PATH = "./whisper-hakha-chin"
 
 processor = WhisperProcessor.from_pretrained(MODEL_PATH)
 model = WhisperForConditionalGeneration.from_pretrained(MODEL_PATH)
