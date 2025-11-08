@@ -39,9 +39,9 @@ if device == "cpu":
 
 # Load the data
 print("\n📂 Loading data...")
-with open('./train_data.json', 'r', encoding='utf-8') as f:
+with open('./combined_train_data.json', 'r', encoding='utf-8') as f:
     train_data = json.load(f)
-with open('./val_data.json', 'r', encoding='utf-8') as f:
+with open('./combined_val_data.json', 'r', encoding='utf-8') as f:
     val_data = json.load(f)
 
 print(f"Train samples: {len(train_data)}")
