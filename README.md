@@ -28,7 +28,7 @@ This project fine-tunes OpenAI's Whisper model on Hakha Chin Bible audio to crea
 
 ```bash
 # Clone the repository
-git clone https://github.com/trinitron83/ChinTranslator2.git
+git clone https://github.com/trinitron88/ChinTranslator2.git
 cd ChinTranslator2
 
 # Install dependencies
@@ -208,7 +208,7 @@ This project is for educational and language preservation purposes. Please respe
 
 ## 📧 Contact
 
-For questions or collaboration: [GitHub Issues](https://github.com/trinitron83/ChinTranslator2/issues)
+For questions or collaboration: [GitHub Issues](https://github.com/trinitron88/ChinTranslator2/issues)
 
 ---
 
