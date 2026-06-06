@@ -1,0 +1,100 @@
+##### MARKDOWN CELL 1 #####
+# 🎤 Hakha Chin STT — V5 Fresh Training Cycle (Colab)
+
+Run-all, phone-friendly. This trains `whisper-large-v3-turbo` on Hakha Chin
+(cnh) with LoRA and saves **every artifact to Google Drive** so nothing is
+lost when the runtime recycles.
+
+**No Drive data needed to train** — the dataset is pulled from a public
+Hugging Face mirror of Common Voice (`fsicoli/common_voice_17_0`).
+
+**Steps:** GPU check → mount Drive → clone repo → prepare data → train →
+export to CT2 → (optional) launch the Gradio demo.
+
+**Before you run:** Runtime ▸ Change runtime type ▸ **GPU (T4)**, then
+Runtime ▸ **Run all**.
+
+> Tip: set `SMOKE = True` in the config cell for a ~5-min end-to-end dry run
+> (tiny subset, 1 epoch) to confirm the whole pipeline works, then flip it
+> back to `False` for the real run.
+
+##### CODE CELL 2 #####
+# --- 0. Config ---------------------------------------------------------
+SMOKE = False        # True = fast dry run (tiny data, 1 epoch) to test the pipeline
+EPOCHS = 8           # real-run epochs (ignored when SMOKE=True)
+BRANCH = "claude/latest-result-5kTMp"   # repo branch to pull the code from
+DRIVE_ROOT = "/content/drive/MyDrive/ChinTranslator"
+
+import time
+RUN_TAG = time.strftime("%Y%m%d-%H%M%S")
+print(f"Config: SMOKE={SMOKE}  EPOCHS={EPOCHS}  RUN_TAG={RUN_TAG}")
+
+##### CODE CELL 3 #####
+# --- 1. GPU check (LoRA 8-bit needs a CUDA GPU) ------------------------
+import torch
+assert torch.cuda.is_available(), (
+    "No GPU! Runtime ▸ Change runtime type ▸ Hardware accelerator ▸ GPU (T4), then Run all."
+)
+print("✓ GPU:", torch.cuda.get_device_name(0))
+
+##### CODE CELL 4 #####
+# --- 2. Mount Drive + lay out a versioned run folder -------------------
+import os
+from google.colab import drive
+drive.mount('/content/drive')
+
+RUN_DIR  = f"{DRIVE_ROOT}/runs/{RUN_TAG}"
+LORA_OUT = f"{RUN_DIR}/whisper-cnh-turbo-lora"   # LoRA adapter (persisted)
+CT2_OUT  = f"{RUN_DIR}/whisper-cnh-turbo-ct2"    # faster-whisper model (persisted)
+os.makedirs(RUN_DIR, exist_ok=True)
+print("📁 Artifacts will be saved under:", RUN_DIR)
+
+##### CODE CELL 5 #####
+# --- 3. Clone the repo (public) at the chosen branch ------------------
+%cd /content
+![ -d ChinTranslator ] && rm -rf ChinTranslator
+!git clone -q -b {BRANCH} https://github.com/trinitron88/ChinTranslator.git
+%cd /content/ChinTranslator
+!git log --oneline -1
+
+##### CODE CELL 6 #####
+# --- 4. Prepare data (Common Voice cnh from Hugging Face) -------------
+# Saved to ephemeral /content (reproducible from HF, no need to persist).
+limit_arg = "--limit 80" if SMOKE else ""
+!python prepare_data.py --out data/cv_cnh {limit_arg}
+
+##### CODE CELL 7 #####
+# --- 5. Train LoRA → save adapter straight to Drive -------------------
+ep = 1 if SMOKE else EPOCHS
+!python train.py --data data/cv_cnh --out "{LORA_OUT}" --epochs {ep}
+print("\n✓ Adapter saved to:", LORA_OUT)
+
+##### CODE CELL 8 #####
+# --- 6. Merge + convert to CT2 → save to Drive -----------------------
+# Merged intermediate stays ephemeral; the CT2 model is what faster-whisper serves.
+!python export_model.py \
+  --adapter "{LORA_OUT}" \
+  --merged-out /content/whisper-cnh-turbo-merged \
+  --ct2-out "{CT2_OUT}" \
+  --quantization float16
+
+# Record where the latest good model lives, for easy reuse later.
+with open(f"{DRIVE_ROOT}/LATEST_MODEL.txt", "w") as f:
+    f.write(CT2_OUT + "\n")
+print("\n✅ CT2 model saved to:", CT2_OUT)
+print("   (path also written to", f"{DRIVE_ROOT}/LATEST_MODEL.txt)")
+
+##### MARKDOWN CELL 9 #####
+## ▶️ Serve the fine-tuned model (optional)
+
+Launches the Gradio demo pointed at the CT2 model you just trained. It prints
+a public `*.gradio.live` link you can open from your phone.
+
+To re-serve in a future session without retraining, just mount Drive and run
+this cell — the path is in `LATEST_MODEL.txt`.
+
+##### CODE CELL 10 #####
+# --- 7. Launch Gradio on the freshly trained model --------------------
+import os
+os.environ["CHIN_MODEL"] = CT2_OUT
+!CHIN_MODEL="{CT2_OUT}" python gradio_interface.py
