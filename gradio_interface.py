@@ -9,7 +9,8 @@ def pipi(*args): subprocess.run([sys.executable, "-m", "pip", "install", *args],
 pipi("faster-whisper", "torchaudio", "gradio", "deep-translator")
 
 import torch, torchaudio, numpy as np, gradio as gr
-from faster_whisper import WhisperModel
+from pathlib import Path
+from faster_whisper import WhisperModel, available_models
 from deep_translator import GoogleTranslator
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -17,13 +18,57 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # export_model.py, set CHIN_MODEL to the local CT2 dir, e.g.:
 #   CHIN_MODEL=whisper-cnh-turbo-ct2 python gradio_interface.py
 MODEL_NAME = os.environ.get("CHIN_MODEL", "large-v3")
+
+
+def resolve_model(name):
+    """Turn CHIN_MODEL into something WhisperModel can actually load.
+
+    faster-whisper only accepts: a built-in size name (large-v3, turbo, ...),
+    an HF repo id ("org/model"), or an *existing* local directory. If you pass a
+    bare local name like 'whisper-cnh-turbo-ct2' and the folder isn't found
+    (e.g. the app is launched from a different working dir than export_model.py
+    wrote to), it silently treats it as a size name and dies with a confusing
+    'Invalid model size' error. Resolve to an absolute path here, and fail fast
+    with an actionable message instead.
+    """
+    # Existing local dir → pin to absolute path so cwd can't break it later.
+    p = Path(name).expanduser()
+    if p.is_dir():
+        return str(p.resolve())
+    # Built-in size → let faster-whisper download it.
+    if name in available_models():
+        return name
+    # HF repo id → let faster-whisper resolve/download it.
+    if "/" in name:
+        return name
+    # Looks like a local CT2 dir name but the folder isn't here.
+    raise FileNotFoundError(
+        f"CHIN_MODEL='{name}' is not a built-in Whisper size and no such "
+        f"directory exists (looked in {p.resolve().parent}). "
+        f"Run export_model.py to produce the CT2 folder, then launch from the "
+        f"directory that contains it (or set CHIN_MODEL to its absolute path). "
+        f"Built-in sizes: {', '.join(available_models())}."
+    )
+
+
+MODEL_PATH = resolve_model(MODEL_NAME)
 # Loud banner so it's impossible to mistake which model is actually serving
 # (e.g. the stale V4 in an old folder vs. the fine-tuned CT2 model).
 print("=" * 64)
 print(f"  Hakha Chin STT  |  MODEL: {MODEL_NAME}  |  DEVICE: {DEVICE}")
+if MODEL_PATH != MODEL_NAME:
+    print(f"  resolved → {MODEL_PATH}")
 if MODEL_NAME == "large-v3":
     print("  ⚠️  stock large-v3 (NOT fine-tuned). Set CHIN_MODEL=whisper-cnh-turbo-ct2")
 print("=" * 64)
+
+# Load once at startup: surfaces a bad model immediately (not on first request)
+# and avoids re-reading the weights on every audio upload.
+print(f"⏳ Loading model ({MODEL_PATH}) ...")
+MODEL = WhisperModel(MODEL_PATH,
+                     device=DEVICE,
+                     compute_type="float16" if DEVICE == "cuda" else "int8")
+print("✓ Model loaded.")
 
 # ---------------- Core helpers ----------------
 
@@ -102,7 +147,7 @@ def refine_by_word_gaps(segments, max_gap_s=0.60, max_len_s=20.0, min_len_s=1.0)
 # ---------------- Transcribe pipeline ----------------
 
 def transcribe_file(audio_path,
-                    model_name=MODEL_NAME,
+                    model=MODEL,
                     max_subwin_s=20.0,
                     vad_min_sil_ms=500,
                     vad_pad_ms=140,
@@ -115,10 +160,6 @@ def transcribe_file(audio_path,
                               min_sil_ms=vad_min_sil_ms,
                               pad_ms=vad_pad_ms,
                               merge_gap_ms=vad_merge_gap_ms)
-
-    model = WhisperModel(model_name,
-                         device=DEVICE,
-                         compute_type="float16" if DEVICE=="cuda" else "int8")
 
     segments = []
     for (s0, s1) in wins:
@@ -186,7 +227,7 @@ def process_audio(audio_file: str):
     if not audio_file:
         return "❌ Upload audio!", "", ""
     try:
-        refined, english = transcribe_file(audio_file, model_name=MODEL_NAME)
+        refined, english = transcribe_file(audio_file)
 
         chin_display = to_cnh(english)               # keep first box as “Hakha Chin”
         stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** {MODEL_NAME}"
