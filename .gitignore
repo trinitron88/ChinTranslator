@@ -14,3 +14,9 @@ commonvoice_val_data.json
 # Archived raw Bible corpus (binary audio + transcripts), kept locally only
 archive/bible_dataset/audio/
 archive/bible_dataset/text/
+
+# Prepared dataset + extracted clips (regenerate: python prepare_data.py)
+data/
+
+# Training outputs (LoRA adapter / merged model)
+whisper-cnh-*/
