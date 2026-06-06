@@ -20,3 +20,7 @@ data/
 
 # Training outputs (LoRA adapter / merged model)
 whisper-cnh-*/
+
+# Python bytecode
+__pycache__/
+*.pyc
