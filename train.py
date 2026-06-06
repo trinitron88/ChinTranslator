@@ -42,6 +42,7 @@ from peft import (  # noqa: E402
     prepare_model_for_kbit_training,
 )
 from transformers import (  # noqa: E402
+    BitsAndBytesConfig,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     WhisperForConditionalGeneration,
@@ -123,7 +124,9 @@ def main():
     print(f"\n🤖 Loading base ({'8-bit' if use_8bit else 'full precision'}) + attaching LoRA ...")
     if use_8bit:
         model = WhisperForConditionalGeneration.from_pretrained(
-            model_id, load_in_8bit=True, device_map="auto"
+            model_id,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            device_map="auto",
         )
         model = prepare_model_for_kbit_training(model)
         # with a frozen 8-bit base + gradient checkpointing, the encoder input
