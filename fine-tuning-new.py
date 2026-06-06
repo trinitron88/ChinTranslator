@@ -25,7 +25,7 @@ import evaluate
 MODEL_NAME = "openai/whisper-small"
 LANGUAGE = None
 TASK = "transcribe"
-OUTPUT_DIR = "./whisper-hakha-chin"
+OUTPUT_DIR="/content/whisper-hakha-chin" 
 
 print("="*50)
 print("Whisper Fine-tuning for Hakha Chin")
@@ -38,11 +38,11 @@ print(f"\nUsing device: {device}")
 if device == "cpu":
     print("⚠️  WARNING: No GPU detected. Training will be very slow!")
 
-# Load the ALIGNED data
-print("\n📂 Loading aligned data...")
-with open('combined_train_data.json', 'r', encoding='utf-8') as f:
+# Load the V5 data (Common Voice cnh, pre-aligned — see load_common_voice.py)
+print("\n📂 Loading V5 (Common Voice) data...")
+with open('v5_train_data.json', 'r', encoding='utf-8') as f:
     train_data = json.load(f)
-with open('combined_val_data.json', 'r', encoding='utf-8') as f:
+with open('v5_val_data.json', 'r', encoding='utf-8') as f:
     val_data = json.load(f)
 
 print(f"Train segments: {len(train_data)}")
@@ -177,15 +177,15 @@ training_args = Seq2SeqTrainingArguments(
     gradient_accumulation_steps=4,
     learning_rate=1e-5,
     warmup_steps=100,
-    num_train_epochs=5,
+    num_train_epochs=8,
     gradient_checkpointing=False,  # DISABLED to fix the bug
     fp16=True if device == "cuda" else False,
     eval_strategy="steps",
     per_device_eval_batch_size=4,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=200,
-    eval_steps=200,
+    save_steps=100,
+    eval_steps=100,
     logging_steps=25,
     report_to=["tensorboard"],
     load_best_model_at_end=True,

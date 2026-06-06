@@ -1,3 +1,16 @@
 /Audio
 /Text
 .venv
+
+# macOS
+.DS_Store
+
+# Generated data artifacts — regenerate with: python load_common_voice.py --resplit
+v5_train_data.json
+v5_val_data.json
+commonvoice_train_data.json
+commonvoice_val_data.json
+
+# Archived raw Bible corpus (binary audio + transcripts), kept locally only
+archive/bible_dataset/audio/
+archive/bible_dataset/text/

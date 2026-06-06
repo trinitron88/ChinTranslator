@@ -165,12 +165,12 @@ split = int(len(aligned_segments) * 0.8)
 train = aligned_segments[:split]
 val = aligned_segments[split:]
 
-with open("aligned_train_data.json", "w", encoding="utf-8") as f:
+with open("combined_train_data.json", "w", encoding="utf-8") as f:
     json.dump(train, f, ensure_ascii=False, indent=2)
 
-with open("aligned_val_data.json", "w", encoding="utf-8") as f:
+with open("combined_val_data.json", "w", encoding="utf-8") as f:
     json.dump(val, f, ensure_ascii=False, indent=2)
 
-print(f"✅ Train: {len(train)} → aligned_train_data.json")
-print(f"✅ Val:   {len(val)} → aligned_val_data.json")
+print(f"✅ Train: {len(train)} → combined_train_data.json")
+print(f"✅ Val:   {len(val)} → combined_val_data.json")
 print("\n🎉 Done.")
