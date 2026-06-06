@@ -52,7 +52,21 @@ from transformers import (  # noqa: E402
 MODEL_ID = "openai/whisper-large-v3-turbo"
 TASK = "transcribe"  # cnh has no Whisper language token; train task-only
 DATA_DIR = "data/cv_cnh"
-OUTPUT_DIR = "whisper-cnh-turbo-lora"
+
+
+def _out_base():
+    """Persist to Drive when running on Colab, else the current dir.
+
+    Outputs were landing in ephemeral /content on Colab and vanishing on
+    runtime reset. If Drive is mounted, default the adapter into the project
+    folder there so a fresh cycle survives. Explicit --out always wins.
+    """
+    import os
+    drive = "/content/drive/MyDrive/ChinTranslator"
+    return drive if os.path.isdir("/content/drive/MyDrive") else "."
+
+
+OUTPUT_DIR = f"{_out_base()}/whisper-cnh-turbo-lora"
 
 
 @dataclass

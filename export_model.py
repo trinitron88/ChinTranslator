@@ -43,10 +43,23 @@ import torch  # noqa: E402
 from peft import PeftModel  # noqa: E402
 from transformers import WhisperForConditionalGeneration, WhisperProcessor  # noqa: E402
 
+def _out_base():
+    """Match train.py: persist to Drive on Colab, else current dir.
+
+    Keeps the adapter/CT2 defaults pointed at the same Drive folder train.py
+    writes to, so export finds the adapter and the served model survives a
+    runtime reset. Explicit CLI args always win.
+    """
+    import os
+    drive = "/content/drive/MyDrive/ChinTranslator"
+    return drive if os.path.isdir("/content/drive/MyDrive") else "."
+
+
 BASE_ID = "openai/whisper-large-v3-turbo"
-ADAPTER = "whisper-cnh-turbo-lora"
-MERGED = "whisper-cnh-turbo-merged"
-CT2 = "whisper-cnh-turbo-ct2"
+_BASE = _out_base()
+ADAPTER = f"{_BASE}/whisper-cnh-turbo-lora"   # where train.py saved it
+MERGED = "whisper-cnh-turbo-merged"           # large intermediate; ok ephemeral
+CT2 = f"{_BASE}/whisper-cnh-turbo-ct2"        # what faster-whisper serves
 
 
 def merge(base_id, adapter, merged_out):
