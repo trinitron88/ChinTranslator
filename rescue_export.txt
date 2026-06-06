@@ -1,0 +1,36 @@
+# === RESCUE: live model from the newest saved checkpoint in Drive (NO retraining) ===
+# Stop the current training cell first (press ▢), then run this whole cell.
+!pip install -q "ctranslate2>=4.4" faster-whisper peft transformers accelerate
+
+import glob, os, shutil, subprocess, torch
+from peft import PeftModel
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from google.colab import drive
+drive.mount('/content/drive')
+
+DRIVE_ROOT = "/content/drive/MyDrive/ChinTranslator"
+# Newest epoch checkpoint across ALL runs (so it finds run #1's epoch 1).
+all_ckpts = glob.glob(f"{DRIVE_ROOT}/runs/*/whisper-cnh-turbo-lora/checkpoint-*")
+assert all_ckpts, "No checkpoints found yet in Drive."
+ADAPTER = max(all_ckpts, key=os.path.getmtime)
+RUN_DIR = ADAPTER.split("/whisper-cnh-turbo-lora/")[0]
+CT2_OUT = f"{RUN_DIR}/whisper-cnh-turbo-ct2"
+print("Using adapter:", ADAPTER)
+
+BASE_ID, MERGED = "openai/whisper-large-v3-turbo", "/content/merged"
+dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+base = WhisperForConditionalGeneration.from_pretrained(BASE_ID, torch_dtype=dtype)
+PeftModel.from_pretrained(base, ADAPTER).merge_and_unload().save_pretrained(MERGED)
+WhisperProcessor.from_pretrained(BASE_ID).save_pretrained(MERGED)   # tokenizer == base
+
+if os.path.exists(CT2_OUT): shutil.rmtree(CT2_OUT)
+subprocess.run(["ct2-transformers-converter", "--model", MERGED, "--output_dir", CT2_OUT,
+                "--copy_files", "tokenizer.json", "preprocessor_config.json",
+                "--quantization", "float16"], check=True)
+with open(f"{DRIVE_ROOT}/LATEST_MODEL.txt", "w") as f: f.write(CT2_OUT + "\n")
+print("✅ CT2 model saved to:", CT2_OUT)
+
+# launch the demo (prints a *.gradio.live link)
+![ -d /content/ChinTranslator ] || git clone -q -b claude/latest-result-5kTMp https://github.com/trinitron88/ChinTranslator.git /content/ChinTranslator
+os.environ["CHIN_MODEL"] = CT2_OUT
+!CHIN_MODEL="{CT2_OUT}" python /content/ChinTranslator/gradio_interface.py
