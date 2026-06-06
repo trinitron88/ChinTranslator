@@ -17,7 +17,13 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # export_model.py, set CHIN_MODEL to the local CT2 dir, e.g.:
 #   CHIN_MODEL=whisper-cnh-turbo-ct2 python gradio_interface.py
 MODEL_NAME = os.environ.get("CHIN_MODEL", "large-v3")
-print("Device:", DEVICE, "| Model:", MODEL_NAME)
+# Loud banner so it's impossible to mistake which model is actually serving
+# (e.g. the stale V4 in an old folder vs. the fine-tuned CT2 model).
+print("=" * 64)
+print(f"  Hakha Chin STT  |  MODEL: {MODEL_NAME}  |  DEVICE: {DEVICE}")
+if MODEL_NAME == "large-v3":
+    print("  ⚠️  stock large-v3 (NOT fine-tuned). Set CHIN_MODEL=whisper-cnh-turbo-ct2")
+print("=" * 64)
 
 # ---------------- Core helpers ----------------
 
