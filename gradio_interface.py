@@ -13,7 +13,11 @@ from faster_whisper import WhisperModel
 from deep_translator import GoogleTranslator
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print("Device:", DEVICE)
+# Default is the stock large-v3 (works before fine-tuning). After training +
+# export_model.py, set CHIN_MODEL to the local CT2 dir, e.g.:
+#   CHIN_MODEL=whisper-cnh-turbo-ct2 python gradio_interface.py
+MODEL_NAME = os.environ.get("CHIN_MODEL", "large-v3")
+print("Device:", DEVICE, "| Model:", MODEL_NAME)
 
 # ---------------- Core helpers ----------------
 
@@ -92,7 +96,7 @@ def refine_by_word_gaps(segments, max_gap_s=0.60, max_len_s=20.0, min_len_s=1.0)
 # ---------------- Transcribe pipeline ----------------
 
 def transcribe_file(audio_path,
-                    model_name="large-v3",
+                    model_name=MODEL_NAME,
                     max_subwin_s=20.0,
                     vad_min_sil_ms=500,
                     vad_pad_ms=140,
@@ -176,12 +180,10 @@ def process_audio(audio_file: str):
     if not audio_file:
         return "❌ Upload audio!", "", ""
     try:
-        refined, english = transcribe_file(audio_file, model_name="large-v3")
-        # If large-v3 OOMs on T4, switch to "medium"
-        # refined, english = transcribe_file(audio_file, model_name="medium")
+        refined, english = transcribe_file(audio_file, model_name=MODEL_NAME)
 
         chin_display = to_cnh(english)               # keep first box as “Hakha Chin”
-        stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** large-v3"
+        stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** {MODEL_NAME}"
         return chin_display or "(empty)", english or "(empty)", stats
     except Exception as e:
         return f"❌ {e}", "", ""
