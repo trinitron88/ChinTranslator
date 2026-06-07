@@ -28,7 +28,14 @@ def _pip():
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "-q",
          "transformers>=4.44", "peft", "accelerate",
-         "ctranslate2>=4.4", "faster-whisper"],
+         "ctranslate2>=4.4", "faster-whisper",
+         "tiktoken", "sentencepiece"],
+        check=False,
+    )
+    # PEFT's torchao guard raises on Colab's stale torchao 0.10 even though an
+    # fp16 merge never uses torchao. Remove it so LoRA injection doesn't crash.
+    subprocess.run(
+        [sys.executable, "-m", "pip", "uninstall", "-y", "-q", "torchao"],
         check=False,
     )
 
@@ -69,8 +76,12 @@ def merge(base_id, adapter, merged_out):
     model = PeftModel.from_pretrained(base, adapter)
     model = model.merge_and_unload()  # fold LoRA deltas into the base weights
     model.save_pretrained(merged_out)
-    # CT2 conversion needs the tokenizer + feature-extractor configs alongside
-    WhisperProcessor.from_pretrained(adapter).save_pretrained(merged_out)
+    # CT2 conversion needs the tokenizer + feature-extractor configs alongside.
+    # Load them from the BASE model, not the adapter checkpoint: LoRA never
+    # changes the tokenizer, and the base ships a complete prebuilt tokenizer,
+    # whereas the training checkpoint only has partial tokenizer files (which
+    # forces a slow->fast conversion that fails).
+    WhisperProcessor.from_pretrained(base_id).save_pretrained(merged_out)
     print(f"✓ Merged model → {merged_out}/")
 
 
