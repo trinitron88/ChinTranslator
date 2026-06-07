@@ -219,19 +219,29 @@ def transcribe_file(audio_path,
 # --------------- Gradio wiring (UI unchanged) ---------------
 
 # Hakha Chin → English. The fine-tuned model outputs Chin text (task="transcribe"),
-# so we translate Chin→EN here. Source MUST be set explicitly: Google's autodetect
-# misidentifies Hakha Chin (it guessed "Krio" in testing), so never let it guess.
-CHIN_CODE = "cnh"  # Hakha Chin code for Google / deep-translator
+# so we translate Chin→EN here. deep-translator's bundled language list is stale and
+# does NOT include Hakha Chin, and Google's autodetect misreads it (→ "Krio"/garbage).
+# But Google's endpoint itself honors sl=cnh, so we call it directly with the source
+# pinned. (Verified: "Na na maw?" → "Are you?")
+CHIN_CODE = "cnh"
+
+def _google_translate(text: str, sl: str, tl: str = "en") -> str:
+    import urllib.parse, urllib.request
+    url = ("https://translate.googleapis.com/translate_a/single"
+           f"?client=gtx&sl={sl}&tl={tl}&dt=t&q=" + urllib.parse.quote(text))
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    # data[0] is a list of [translated_chunk, original_chunk, ...]
+    return "".join(seg[0] for seg in data[0] if seg and seg[0]).strip()
 
 def to_en(text_chin: str) -> str:
     if not text_chin: return ""
     try:
-        out = GoogleTranslator(source=CHIN_CODE, target="en").translate(text_chin)
+        out = _google_translate(text_chin, CHIN_CODE, "en")
         return out or text_chin
     except Exception as e:
-        print(f"[translate] {CHIN_CODE}->en failed ({e}); showing Chin instead. "
-              f"If this persists, the Colab deep-translator is stale: "
-              f"run  pip install -U deep-translator")
+        print(f"[translate] {CHIN_CODE}->en failed ({e}); showing Chin instead.")
         return text_chin
 
 def process_audio(audio_file: str):
