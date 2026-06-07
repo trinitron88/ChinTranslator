@@ -241,7 +241,11 @@ def process_audio(audio_file: str):
         stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** {MODEL_NAME}"
         return chin or "(empty)", english or "(empty)", stats
     except Exception as e:
-        return f"❌ {e}", "", ""
+        import traceback
+        tb = traceback.format_exc()
+        print("\n===== process_audio ERROR =====\n" + tb, flush=True)
+        detail = f"❌ {type(e).__name__}: {e}\n\n{tb}"
+        return detail, detail, "**Error** — full traceback in the boxes and the cell logs"
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 🎤 Hakha Chin Speech-to-Text (Optimized Backend)\nUpload audio → Hakha Chin (display) → English")
