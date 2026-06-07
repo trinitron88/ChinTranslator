@@ -81,7 +81,12 @@ def merge(base_id, adapter, merged_out):
     # changes the tokenizer, and the base ships a complete prebuilt tokenizer,
     # whereas the training checkpoint only has partial tokenizer files (which
     # forces a slow->fast conversion that fails).
-    WhisperProcessor.from_pretrained(base_id).save_pretrained(merged_out)
+    processor = WhisperProcessor.from_pretrained(base_id)
+    processor.save_pretrained(merged_out)
+    # The CT2 converter specifically requires preprocessor_config.json, but some
+    # transformers versions don't emit it from processor.save_pretrained — write
+    # the feature extractor explicitly to guarantee that file exists.
+    processor.feature_extractor.save_pretrained(merged_out)
     print(f"✓ Merged model → {merged_out}/")
 
 
