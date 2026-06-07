@@ -259,22 +259,40 @@ def speak_en(text_en: str):
         print(f"[tts] failed ({e}); no audio.")
         return None
 
+# --- In-memory session history (lives until the app/runtime restarts) ---
+import datetime
+HISTORY = []  # rows of [time, hakha_chin, english]
+
+def _history_view():
+    """Newest-first rows for the history table."""
+    return [[t, c, e] for (t, c, e) in reversed(HISTORY)]
+
+def _log_history(chin: str, english: str):
+    HISTORY.append([datetime.datetime.now().strftime("%H:%M:%S"), chin, english])
+
+def clear_history():
+    HISTORY.clear()
+    return _history_view()
+
 def process_audio(audio_file: str):
     if not audio_file:
-        return "❌ Upload audio!", "", "", None
+        return "❌ Upload audio!", "", "", None, _history_view()
     try:
         # transcribe_file returns (segments, transcription). The fine-tuned model
         # transcribes Hakha Chin, so this text is Chin — translate it to English.
         refined, chin = transcribe_file(audio_file, fallback_to_en=False)
         english = to_en(chin)
         stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** {MODEL_NAME}"
-        return chin or "(empty)", english or "(empty)", stats, speak_en(english)
+        chin_display, english_display = chin or "(empty)", english or "(empty)"
+        if chin and chin.strip():
+            _log_history(chin_display, english_display)
+        return chin_display, english_display, stats, speak_en(english), _history_view()
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         print("\n===== process_audio ERROR =====\n" + tb, flush=True)
         detail = f"❌ {type(e).__name__}: {e}\n\n{tb}"
-        return detail, detail, "**Error** — full traceback in the boxes and the cell logs", None
+        return detail, detail, "**Error** — full traceback in the boxes and the cell logs", None, _history_view()
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 🎤 Hakha Chin Speech-to-Text (Optimized Backend)\nUpload audio → Hakha Chin (display) → English")
@@ -287,7 +305,14 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             translation_out = gr.Textbox(label="🌍 English", lines=10)
             audio_out = gr.Audio(label="🔊 English (spoken)", autoplay=True)
             stats_out = gr.Markdown()
-    _outs = [transcription_out, translation_out, stats_out, audio_out]
+    with gr.Accordion("🕘 History (this session)", open=False):
+        history_out = gr.Dataframe(
+            headers=["Time", "Hakha Chin", "English"],
+            datatype=["str", "str", "str"],
+            wrap=True, interactive=False,
+        )
+        clear_btn = gr.Button("Clear history", size="sm")
+    _outs = [transcription_out, translation_out, stats_out, audio_out, history_out]
     # Pressing Translate while recording should also STOP the recording. The mic is
     # a frontend widget, so we click its Stop button via JS; stop_recording (below)
     # then fires with the finalized audio and runs the pipeline.
@@ -304,6 +329,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     # Auto-run when a recording stops or a file is uploaded (one fire each, no dupes).
     audio_input.stop_recording(fn=process_audio, inputs=audio_input, outputs=_outs)
     audio_input.upload(fn=process_audio, inputs=audio_input, outputs=_outs)
+    clear_btn.click(fn=clear_history, inputs=None, outputs=history_out)
 
 print("\n🚀 Launching…")
 demo.launch(share=True, debug=True)
