@@ -214,24 +214,32 @@ def transcribe_file(audio_path,
 
 # --------------- Gradio wiring (UI unchanged) ---------------
 
-# EN→CNH for the first box so UI remains “Hakha Chin → English”
-def to_cnh(text_en: str) -> str:
-    if not text_en: return ""
+# Hakha Chin → English. The fine-tuned model outputs Chin text (task="transcribe"),
+# so we translate Chin→EN here. Source MUST be set explicitly: Google's autodetect
+# misidentifies Hakha Chin (it guessed "Krio" in testing), so never let it guess.
+CHIN_CODE = "cnh"  # Hakha Chin code for Google / deep-translator
+
+def to_en(text_chin: str) -> str:
+    if not text_chin: return ""
     try:
-        return GoogleTranslator(source="en", target="cnh").translate(text_en)
-    except Exception:
-        # worst case: show English if cnh target is unavailable
-        return text_en
+        out = GoogleTranslator(source=CHIN_CODE, target="en").translate(text_chin)
+        return out or text_chin
+    except Exception as e:
+        print(f"[translate] {CHIN_CODE}->en failed ({e}); showing Chin instead. "
+              f"If this persists, the Colab deep-translator is stale: "
+              f"run  pip install -U deep-translator")
+        return text_chin
 
 def process_audio(audio_file: str):
     if not audio_file:
         return "❌ Upload audio!", "", ""
     try:
-        refined, english = transcribe_file(audio_file)
-
-        chin_display = to_cnh(english)               # keep first box as “Hakha Chin”
+        # transcribe_file returns (segments, transcription). The fine-tuned model
+        # transcribes Hakha Chin, so this text is Chin — translate it to English.
+        refined, chin = transcribe_file(audio_file, fallback_to_en=False)
+        english = to_en(chin)
         stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** {MODEL_NAME}"
-        return chin_display or "(empty)", english or "(empty)", stats
+        return chin or "(empty)", english or "(empty)", stats
     except Exception as e:
         return f"❌ {e}", "", ""
 
