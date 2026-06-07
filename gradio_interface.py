@@ -288,8 +288,22 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             audio_out = gr.Audio(label="🔊 English (spoken)", autoplay=True)
             stats_out = gr.Markdown()
     _outs = [transcription_out, translation_out, stats_out, audio_out]
-    btn.click(fn=process_audio, inputs=audio_input, outputs=_outs)
-    audio_input.change(fn=process_audio, inputs=audio_input, outputs=_outs)
+    # Pressing Translate while recording should also STOP the recording. The mic is
+    # a frontend widget, so we click its Stop button via JS; stop_recording (below)
+    # then fires with the finalized audio and runs the pipeline.
+    _stop_js = """
+    (audio) => {
+        const b = document.querySelector('button[aria-label="Stop recording"]')
+              || [...document.querySelectorAll('button')].find(
+                   el => /stop/i.test((el.getAttribute('aria-label')||'') + ' ' + (el.textContent||'')));
+        if (b) b.click();
+        return audio;
+    }
+    """
+    btn.click(fn=process_audio, inputs=audio_input, outputs=_outs, js=_stop_js)
+    # Auto-run when a recording stops or a file is uploaded (one fire each, no dupes).
+    audio_input.stop_recording(fn=process_audio, inputs=audio_input, outputs=_outs)
+    audio_input.upload(fn=process_audio, inputs=audio_input, outputs=_outs)
 
 print("\n🚀 Launching…")
 demo.launch(share=True, debug=True)
