@@ -6,7 +6,7 @@
 # Optional: install (safe to re-run on Colab)
 import sys, subprocess, os, json, tempfile, string
 def pipi(*args): subprocess.run([sys.executable, "-m", "pip", "install", *args], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-pipi("faster-whisper", "torchaudio", "gradio", "deep-translator")
+pipi("faster-whisper", "torchaudio", "gradio", "deep-translator", "gTTS")
 
 import torch, torchaudio, numpy as np, gradio as gr
 from pathlib import Path
@@ -244,22 +244,37 @@ def to_en(text_chin: str) -> str:
         print(f"[translate] {CHIN_CODE}->en failed ({e}); showing Chin instead.")
         return text_chin
 
+def speak_en(text_en: str):
+    """Synthesize English speech (mp3) from the translation. Returns a filepath
+    for the gr.Audio output, or None if there's nothing to say."""
+    text = (text_en or "").strip()
+    if not text or text == "(empty)":
+        return None
+    try:
+        from gtts import gTTS
+        out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
+        gTTS(text=text, lang="en").save(out)
+        return out
+    except Exception as e:
+        print(f"[tts] failed ({e}); no audio.")
+        return None
+
 def process_audio(audio_file: str):
     if not audio_file:
-        return "❌ Upload audio!", "", ""
+        return "❌ Upload audio!", "", "", None
     try:
         # transcribe_file returns (segments, transcription). The fine-tuned model
         # transcribes Hakha Chin, so this text is Chin — translate it to English.
         refined, chin = transcribe_file(audio_file, fallback_to_en=False)
         english = to_en(chin)
         stats = f"**Device:** {DEVICE.upper()} | **Segments:** {len(refined)} | **Model:** {MODEL_NAME}"
-        return chin or "(empty)", english or "(empty)", stats
+        return chin or "(empty)", english or "(empty)", stats, speak_en(english)
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         print("\n===== process_audio ERROR =====\n" + tb, flush=True)
         detail = f"❌ {type(e).__name__}: {e}\n\n{tb}"
-        return detail, detail, "**Error** — full traceback in the boxes and the cell logs"
+        return detail, detail, "**Error** — full traceback in the boxes and the cell logs", None
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 🎤 Hakha Chin Speech-to-Text (Optimized Backend)\nUpload audio → Hakha Chin (display) → English")
@@ -270,9 +285,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         with gr.Column():
             transcription_out = gr.Textbox(label="📝 Hakha Chin", lines=10)
             translation_out = gr.Textbox(label="🌍 English", lines=10)
+            audio_out = gr.Audio(label="🔊 English (spoken)", autoplay=True)
             stats_out = gr.Markdown()
-    btn.click(fn=process_audio, inputs=audio_input, outputs=[transcription_out, translation_out, stats_out])
-    audio_input.change(fn=process_audio, inputs=audio_input, outputs=[transcription_out, translation_out, stats_out])
+    _outs = [transcription_out, translation_out, stats_out, audio_out]
+    btn.click(fn=process_audio, inputs=audio_input, outputs=_outs)
+    audio_input.change(fn=process_audio, inputs=audio_input, outputs=_outs)
 
 print("\n🚀 Launching…")
 demo.launch(share=True, debug=True)
