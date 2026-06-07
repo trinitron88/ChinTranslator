@@ -142,16 +142,21 @@ def on_utterance(audio):
 # helper name varies by version, so we try a couple and fall back to None (which
 # works on localhost / same LAN). See REALTIME.md if the phone can't connect.
 rtc_configuration = None
-if os.environ.get("HF_TOKEN"):
+_hf = os.environ.get("HF_TOKEN")
+if _hf:
     try:
-        from fastrtc import get_hf_turn_credentials  # type: ignore
-        rtc_configuration = get_hf_turn_credentials()
-    except Exception:
+        # get_hf_turn_credentials is deprecated (and its old endpoint 404s/DNS-fails);
+        # FastRTC now brokers free Cloudflare TURN from your HF token.
+        from fastrtc import get_cloudflare_turn_credentials  # type: ignore
         try:
-            from fastrtc import get_turn_credentials  # type: ignore
-            rtc_configuration = get_turn_credentials()
-        except Exception as e:
-            print(f"[turn] no TURN credentials ({e}); cross-network may fail.")
+            rtc_configuration = get_cloudflare_turn_credentials(hf_token=_hf)
+        except TypeError:
+            rtc_configuration = get_cloudflare_turn_credentials(token=_hf)
+        print("[turn] using Cloudflare TURN credentials")
+    except Exception as e:
+        print(f"[turn] TURN setup failed ({e}); cross-network will likely fail.")
+else:
+    print("[turn] HF_TOKEN not set; cross-network will likely fail.")
 
 stream = Stream(
     handler=ReplyOnPause(on_utterance),
