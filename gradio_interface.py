@@ -179,6 +179,9 @@ def transcribe_file(audio_path,
                     compression_ratio_threshold=2.2,
                     vad_filter=False
                 )
+                # faster-whisper returns a ONE-SHOT generator. Materialize it, or
+                # the text scan below exhausts it and the segment loop sees nothing.
+                part = list(part)
                 txt = "".join(s.text for s in part).strip()
 
                 # If glyph soup → fallback to English translate
@@ -194,6 +197,7 @@ def transcribe_file(audio_path,
                         compression_ratio_threshold=2.2,
                         vad_filter=False
                     )
+                    part = list(part)
 
                 for s in part:
                     segments.append({
