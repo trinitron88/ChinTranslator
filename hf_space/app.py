@@ -94,12 +94,12 @@ def on_utterance(audio):
 _HF = os.environ.get("HF_TOKEN")
 _TURN_URLS = os.environ.get("TURN_URLS")
 
+server_rtc_configuration = None
 if _TURN_URLS:
     # Preferred: STATIC TURN creds (set TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL
     # as Space secrets, e.g. from a free ExpressTURN or Metered account). No
-    # credential-broker fetch — which is the thing that kept DNS-failing in Colab
-    # and Spaces. The browser contacts the TURN server directly at connect time.
-    rtc_configuration = {"iceServers": [
+    # credential-broker fetch — which is the thing that kept DNS-failing.
+    _static_turn = {"iceServers": [
         {"urls": "stun:stun.l.google.com:19302"},
         {
             "urls": [u.strip() for u in _TURN_URLS.split(",") if u.strip()],
@@ -107,10 +107,14 @@ if _TURN_URLS:
             "credential": os.environ.get("TURN_CREDENTIAL", ""),
         },
     ]}
-    print("[turn] using STATIC TURN from env (TURN_URLS)")
+    rtc_configuration = _static_turn
+    # The Space's server is ALSO behind NAT, so it needs a relay to be reachable
+    # by the browser. Give both sides the same static TURN server.
+    server_rtc_configuration = _static_turn
+    print("[turn] using STATIC TURN from env (TURN_URLS) — client + server")
 else:
-    # Fallback: HF/Cloudflare async broker (works in theory, but DNS-fails in
-    # these sandboxes — kept only so the app still boots without static creds).
+    # Fallback: HF/Cloudflare async broker (DNS-fails in these sandboxes; kept
+    # only so the app still boots without static creds).
     from fastrtc import get_cloudflare_turn_credentials_async
 
     async def rtc_configuration():
@@ -123,6 +127,7 @@ stream = Stream(
     modality="audio",
     mode="send-receive",
     rtc_configuration=rtc_configuration,
+    server_rtc_configuration=server_rtc_configuration,
 )
 
 # Spaces (gradio SDK) serves this `demo` object.
