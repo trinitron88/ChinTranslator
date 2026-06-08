@@ -91,20 +91,38 @@ def on_utterance(audio):
 # function (HF brokers ~10 GB/mo free TURN via your HF token). It's invoked
 # per-connection, so it satisfies the Spaces startup check WITHOUT a credential
 # fetch at import time — the sync fetch was DNS-failing during startup.
-from fastrtc import get_cloudflare_turn_credentials_async
-
 _HF = os.environ.get("HF_TOKEN")
+_TURN_URLS = os.environ.get("TURN_URLS")
 
+if _TURN_URLS:
+    # Preferred: STATIC TURN creds (set TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL
+    # as Space secrets, e.g. from a free ExpressTURN or Metered account). No
+    # credential-broker fetch — which is the thing that kept DNS-failing in Colab
+    # and Spaces. The browser contacts the TURN server directly at connect time.
+    rtc_configuration = {"iceServers": [
+        {"urls": "stun:stun.l.google.com:19302"},
+        {
+            "urls": [u.strip() for u in _TURN_URLS.split(",") if u.strip()],
+            "username": os.environ.get("TURN_USERNAME", ""),
+            "credential": os.environ.get("TURN_CREDENTIAL", ""),
+        },
+    ]}
+    print("[turn] using STATIC TURN from env (TURN_URLS)")
+else:
+    # Fallback: HF/Cloudflare async broker (works in theory, but DNS-fails in
+    # these sandboxes — kept only so the app still boots without static creds).
+    from fastrtc import get_cloudflare_turn_credentials_async
 
-async def _turn_credentials():
-    return await get_cloudflare_turn_credentials_async(hf_token=_HF)
+    async def rtc_configuration():
+        return await get_cloudflare_turn_credentials_async(hf_token=_HF)
 
+    print("[turn] no TURN_URLS set; falling back to Cloudflare broker (may fail)")
 
 stream = Stream(
     handler=ReplyOnPause(on_utterance),
     modality="audio",
     mode="send-receive",
-    rtc_configuration=_turn_credentials,
+    rtc_configuration=rtc_configuration,
 )
 
 # Spaces (gradio SDK) serves this `demo` object.
