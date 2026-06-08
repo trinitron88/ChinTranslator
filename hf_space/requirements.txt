@@ -1,4 +1,4 @@
-fastrtc
+fastrtc==0.0.34
 faster-whisper
 gTTS
 librosa
