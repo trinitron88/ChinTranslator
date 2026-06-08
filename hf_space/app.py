@@ -87,25 +87,24 @@ def on_utterance(audio):
         yield out
 
 
-# TURN credentials (Cloudflare via your HF token, set as a Space secret).
-rtc_configuration = None
-_hf = os.environ.get("HF_TOKEN")
-if _hf:
-    try:
-        from fastrtc import get_cloudflare_turn_credentials
-        try:
-            rtc_configuration = get_cloudflare_turn_credentials(hf_token=_hf)
-        except TypeError:
-            rtc_configuration = get_cloudflare_turn_credentials(token=_hf)
-        print("[turn] using Cloudflare TURN credentials")
-    except Exception as e:
-        print(f"[turn] setup failed ({e})")
+# TURN for Spaces. Per FastRTC's docs, pass the ASYNC Cloudflare credential
+# function (HF brokers ~10 GB/mo free TURN via your HF token). It's invoked
+# per-connection, so it satisfies the Spaces startup check WITHOUT a credential
+# fetch at import time — the sync fetch was DNS-failing during startup.
+from fastrtc import get_cloudflare_turn_credentials_async
+
+_HF = os.environ.get("HF_TOKEN")
+
+
+async def _turn_credentials():
+    return await get_cloudflare_turn_credentials_async(hf_token=_HF)
+
 
 stream = Stream(
     handler=ReplyOnPause(on_utterance),
     modality="audio",
     mode="send-receive",
-    rtc_configuration=rtc_configuration,
+    rtc_configuration=_turn_credentials,
 )
 
 # Spaces (gradio SDK) serves this `demo` object.
