@@ -222,6 +222,9 @@ stream = Stream(
     additional_outputs_handler=_update_transcript,
     rtc_configuration=rtc_configuration,
     server_rtc_configuration=server_rtc_configuration,
+    # Short, one-line title so it doesn't wrap and overlap the record button
+    # on mobile.
+    ui_args={"title": "Chin Translator"},
 )
 
 # Spaces (gradio SDK) serves this `demo` object. Append a mic-sensitivity slider;
