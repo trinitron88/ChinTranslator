@@ -201,6 +201,7 @@ transcript_box = gr.Textbox(
     max_lines=12,
     interactive=False,
     autoscroll=True,
+    elem_id="transcript_box",
 )
 
 
@@ -227,6 +228,13 @@ stream = Stream(
 # its change handler mutates the shared VAD/gain settings used above, live.
 demo = stream.ui
 with demo:
+    # Bump the transcript font size for readability.
+    gr.HTML(
+        "<style>"
+        "#transcript_box textarea { font-size: 1.5rem !important;"
+        " line-height: 1.6 !important; }"
+        "</style>"
+    )
     direction = gr.Radio(
         choices=[("Hakha Chin → English", "cnh2en"),
                  ("English → Hakha Chin", "en2cnh")],
