@@ -194,12 +194,10 @@ else:
 
 # On-screen transcript. on_utterance yields AdditionalOutputs(chin, english);
 # this handler appends each turn to the running textbox value.
-# Start collapsed (single line) so the box isn't a tall empty area before any
-# speech; it auto-grows up to max_lines as turns accumulate.
 transcript_box = gr.Textbox(
     label="📝 Transcript (source → translation)",
     value="",
-    lines=1,
+    lines=12,
     max_lines=12,
     interactive=False,
     autoscroll=True,
@@ -232,6 +230,17 @@ stream = Stream(
 # Spaces (gradio SDK) serves this `demo` object. Append a mic-sensitivity slider;
 # its change handler mutates the shared VAD/gain settings used above, live.
 demo = stream.ui
+
+# FastRTC renders the transcript inside a right-hand gr.Sidebar that defaults to
+# open, so the Space loads showing the (empty) transcript panel with the mic /
+# Record controls tucked behind a chevron. Collapse that sidebar by default so
+# the Record button is what you see on load; tap the chevron to slide the
+# transcript back in. FastRTC builds the sidebar internally and exposes no flag
+# for this, so we reach into the built Blocks and flip `open` before launch.
+for _block in demo.blocks.values():
+    if isinstance(_block, gr.Sidebar):
+        _block.open = False
+
 with demo:
     # Bump the transcript font size for readability. Also re-align the
     # full-screen WebRTC overlay (which holds the waveform + the Record button
