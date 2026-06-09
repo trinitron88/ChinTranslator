@@ -35,6 +35,13 @@ print("✓ Model loaded.")
 
 CHIN_CODE = "cnh"
 
+# Skip translating/speaking when the input is detected as English. Besides being
+# the requested behavior, this breaks the TTS→mic feedback loop (the English we
+# speak won't get re-transcribed and echoed). Tunable via env: SKIP_ENGLISH=0
+# disables it; EN_SKIP_PROB sets the language-confidence gate.
+SKIP_ENGLISH = os.environ.get("SKIP_ENGLISH", "1") != "0"
+EN_SKIP_PROB = float(os.environ.get("EN_SKIP_PROB", "0.5"))
+
 
 def to_en(text_chin: str) -> str:
     text = (text_chin or "").strip()
@@ -111,9 +118,17 @@ def on_utterance(audio):
         samples = np.clip(samples * gain, -1.0, 1.0)
     if sr != 16000:
         samples = librosa.resample(samples, orig_sr=sr, target_sr=16000)
-    segs, _ = MODEL.transcribe(samples, task="transcribe", beam_size=5, vad_filter=False)
+    segs, info = MODEL.transcribe(samples, task="transcribe", beam_size=5, vad_filter=False)
     chin = "".join(s.text for s in segs).strip()
     if not chin:
+        return
+    lang = getattr(info, "language", "") or ""
+    lang_prob = getattr(info, "language_probability", 0.0) or 0.0
+    print(f"[lang] detected={lang!r} p={lang_prob:.2f}", flush=True)
+    # Input is English → don't translate or speak it back.
+    if SKIP_ENGLISH and lang == "en" and lang_prob >= EN_SKIP_PROB:
+        print(f"EN-SKIP: {chin!r}", flush=True)
+        yield AdditionalOutputs(chin, "(English detected — not spoken)")
         return
     english = to_en(chin)
     print(f"CHIN: {chin!r}  →  EN: {english!r}", flush=True)
