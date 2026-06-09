@@ -43,14 +43,14 @@ SKIP_ENGLISH = os.environ.get("SKIP_ENGLISH", "1") != "0"
 EN_SKIP_PROB = float(os.environ.get("EN_SKIP_PROB", "0.5"))
 
 
-def to_en(text_chin: str) -> str:
-    text = (text_chin or "").strip()
+def translate(text: str, sl: str, tl: str) -> str:
+    text = (text or "").strip()
     if not text:
         return ""
     import urllib.parse
     import urllib.request
     url = ("https://translate.googleapis.com/translate_a/single"
-           f"?client=gtx&sl={CHIN_CODE}&tl=en&dt=t&q=" + urllib.parse.quote(text))
+           f"?client=gtx&sl={sl}&tl={tl}&dt=t&q=" + urllib.parse.quote(text))
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=15) as r:
@@ -61,20 +61,22 @@ def to_en(text_chin: str) -> str:
         return text
 
 
-def speak_en(text_en: str):
-    text = (text_en or "").strip()
+def speak(text: str, lang: str):
+    """TTS via gTTS. Returns None if the language is unsupported (e.g. Chin),
+    in which case the caller just shows text without audio."""
+    text = (text or "").strip()
     if not text:
         return None
     try:
         from gtts import gTTS
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
-        gTTS(text=text, lang="en").save(mp3)
+        gTTS(text=text, lang=lang).save(mp3)
         audio, sr = librosa.load(mp3, sr=24000, mono=True)
         os.unlink(mp3)
         pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).reshape(1, -1)
         return sr, pcm
     except Exception as e:
-        print(f"[tts] failed ({e})")
+        print(f"[tts] failed for lang={lang!r} ({e}) — showing text only")
         return None
 
 
@@ -86,7 +88,15 @@ def speak_en(text_en: str):
 # boosted audio still transcribes cleanly. ReplyOnPause.copy() shares these
 # option objects with every per-connection copy, so mutating them live takes
 # effect on the active stream.
-SETTINGS = {"gain": 1.0}
+SETTINGS = {"gain": 1.0, "direction": "cnh2en"}
+
+# Per-direction config: ASR language hint, translate source/target codes, and
+# TTS language. English→Chin is text-only in practice — gTTS has no Chin voice,
+# so speak() returns None and we just show the transcript.
+DIRECTIONS = {
+    "cnh2en": {"asr_lang": None, "sl": CHIN_CODE, "tl": "en", "tts": "en"},
+    "en2cnh": {"asr_lang": "en", "sl": "en", "tl": CHIN_CODE, "tts": CHIN_CODE},
+}
 
 vad_options = SileroVadOptions(threshold=0.5)
 algo_options = AlgoOptions()
@@ -118,26 +128,33 @@ def on_utterance(audio):
         samples = np.clip(samples * gain, -1.0, 1.0)
     if sr != 16000:
         samples = librosa.resample(samples, orig_sr=sr, target_sr=16000)
-    segs, info = MODEL.transcribe(samples, task="transcribe", beam_size=5, vad_filter=False)
-    chin = "".join(s.text for s in segs).strip()
-    if not chin:
+    cfg = DIRECTIONS[SETTINGS["direction"]]
+    asr_kwargs = {"task": "transcribe", "beam_size": 5, "vad_filter": False}
+    if cfg["asr_lang"]:
+        asr_kwargs["language"] = cfg["asr_lang"]
+    segs, info = MODEL.transcribe(samples, **asr_kwargs)
+    src_text = "".join(s.text for s in segs).strip()
+    if not src_text:
         return
     lang = getattr(info, "language", "") or ""
     lang_prob = getattr(info, "language_probability", 0.0) or 0.0
-    print(f"[lang] detected={lang!r} p={lang_prob:.2f}", flush=True)
-    # Input is English → don't translate or speak it back.
-    if SKIP_ENGLISH and lang == "en" and lang_prob >= EN_SKIP_PROB:
-        print(f"EN-SKIP: {chin!r}", flush=True)
-        yield AdditionalOutputs(chin, "(English detected — not spoken)")
+    print(f"[lang] dir={SETTINGS['direction']} detected={lang!r} p={lang_prob:.2f}", flush=True)
+    # In Chin→English mode, drop English input: don't echo it, and break the
+    # TTS→mic feedback loop. (Not applied in English→Chin mode, where English
+    # is the expected input.)
+    if (SETTINGS["direction"] == "cnh2en" and SKIP_ENGLISH
+            and lang == "en" and lang_prob >= EN_SKIP_PROB):
+        print(f"EN-SKIP: {src_text!r}", flush=True)
+        yield AdditionalOutputs(src_text, "(English detected — not spoken)")
         return
-    english = to_en(chin)
-    print(f"CHIN: {chin!r}  →  EN: {english!r}", flush=True)
+    out_text = translate(src_text, cfg["sl"], cfg["tl"])
+    print(f"{cfg['sl'].upper()}: {src_text!r}  →  {cfg['tl'].upper()}: {out_text!r}", flush=True)
     # Push the text to the on-screen transcript first, so it appears even if TTS
-    # fails or is skipped.
-    yield AdditionalOutputs(chin, english)
-    out = speak_en(english)
-    if out is not None:
-        yield out
+    # fails or is skipped (e.g. no Chin voice).
+    yield AdditionalOutputs(src_text, out_text)
+    audio_out = speak(out_text, cfg["tts"])
+    if audio_out is not None:
+        yield audio_out
 
 
 # TURN for Spaces. Per FastRTC's docs, pass the ASYNC Cloudflare credential
@@ -178,7 +195,7 @@ else:
 # On-screen transcript. on_utterance yields AdditionalOutputs(chin, english);
 # this handler appends each turn to the running textbox value.
 transcript_box = gr.Textbox(
-    label="📝 Transcript (Hakha Chin → English)",
+    label="📝 Transcript (source → translation)",
     value="",
     lines=12,
     max_lines=12,
@@ -210,6 +227,15 @@ stream = Stream(
 # its change handler mutates the shared VAD/gain settings used above, live.
 demo = stream.ui
 with demo:
+    direction = gr.Radio(
+        choices=[("Hakha Chin → English", "cnh2en"),
+                 ("English → Hakha Chin", "en2cnh")],
+        value="cnh2en",
+        label="🔁 Translation direction",
+        info="English → Hakha Chin is text-only (no Chin voice available to speak back).",
+    )
+    direction.change(lambda d: SETTINGS.update(direction=d),
+                     inputs=direction, outputs=None)
     sensitivity = gr.Slider(
         minimum=0, maximum=100, value=_DEFAULT_SENSITIVITY, step=5,
         label="🎙️ Mic sensitivity",
