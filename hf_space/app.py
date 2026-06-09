@@ -194,10 +194,12 @@ else:
 
 # On-screen transcript. on_utterance yields AdditionalOutputs(chin, english);
 # this handler appends each turn to the running textbox value.
+# Start collapsed (single line) so the box isn't a tall empty area before any
+# speech; it auto-grows up to max_lines as turns accumulate.
 transcript_box = gr.Textbox(
     label="📝 Transcript (source → translation)",
     value="",
-    lines=12,
+    lines=1,
     max_lines=12,
     interactive=False,
     autoscroll=True,
