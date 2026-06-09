@@ -242,7 +242,10 @@ with demo:
         "<style>"
         "#transcript_box textarea { font-size: 1.5rem !important;"
         " line-height: 1.6 !important; }"
-        ".audio-container { justify-content: space-between !important; }"
+        ".audio-container { justify-content: space-between !important;"
+        " padding-bottom: 56px !important; }"
+        ".audio-container .gradio-webrtc-waveContainer {"
+        " margin-top: -34px !important; }"
         "</style>"
     )
     direction = gr.Radio(
