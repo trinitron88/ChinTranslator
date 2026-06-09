@@ -21,7 +21,9 @@ import librosa
 import torch
 import gradio as gr
 from faster_whisper import WhisperModel
-from fastrtc import Stream, ReplyOnPause, AlgoOptions, SileroVadOptions
+from fastrtc import (
+    Stream, ReplyOnPause, AlgoOptions, SileroVadOptions, AdditionalOutputs,
+)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # Set CHIN_MODEL to your CT2 model repo id; faster-whisper downloads it from HF.
@@ -115,6 +117,9 @@ def on_utterance(audio):
         return
     english = to_en(chin)
     print(f"CHIN: {chin!r}  →  EN: {english!r}", flush=True)
+    # Push the text to the on-screen transcript first, so it appears even if TTS
+    # fails or is skipped.
+    yield AdditionalOutputs(chin, english)
     out = speak_en(english)
     if out is not None:
         yield out
@@ -155,6 +160,23 @@ else:
 
     print("[turn] no TURN_URLS set; falling back to Cloudflare broker (may fail)")
 
+# On-screen transcript. on_utterance yields AdditionalOutputs(chin, english);
+# this handler appends each turn to the running textbox value.
+transcript_box = gr.Textbox(
+    label="📝 Transcript (Hakha Chin → English)",
+    value="",
+    lines=12,
+    max_lines=12,
+    interactive=False,
+    autoscroll=True,
+)
+
+
+def _update_transcript(current: str, chin: str, english: str) -> str:
+    entry = f"🗣️ {chin}\n🔤 {english}"
+    return f"{current}\n\n{entry}".strip() if current else entry
+
+
 stream = Stream(
     handler=ReplyOnPause(
         on_utterance,
@@ -163,6 +185,8 @@ stream = Stream(
     ),
     modality="audio",
     mode="send-receive",
+    additional_outputs=[transcript_box],
+    additional_outputs_handler=_update_transcript,
     rtc_configuration=rtc_configuration,
     server_rtc_configuration=server_rtc_configuration,
 )
