@@ -243,7 +243,6 @@ with demo:
                  ("English → Hakha Chin", "en2cnh")],
         value="cnh2en",
         label="🔁 Translation direction",
-        info="English → Hakha Chin is text-only (no Chin voice available to speak back).",
     )
     direction.change(lambda d: SETTINGS.update(direction=d),
                      inputs=direction, outputs=None)
