@@ -231,11 +231,14 @@ stream = Stream(
 # its change handler mutates the shared VAD/gain settings used above, live.
 demo = stream.ui
 with demo:
-    # Bump the transcript font size for readability.
+    # Bump the transcript font size for readability, and shift the (full-screen,
+    # fixed-position) WebRTC waveform down so it sits behind the Record button
+    # instead of being hidden under the controls card.
     gr.HTML(
         "<style>"
         "#transcript_box textarea { font-size: 1.5rem !important;"
         " line-height: 1.6 !important; }"
+        ".gradio-webrtc-waveContainer { transform: translateY(185px) !important; }"
         "</style>"
     )
     direction = gr.Radio(
