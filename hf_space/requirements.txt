@@ -1,0 +1,8 @@
+fastrtc==0.0.34
+faster-whisper
+gTTS
+librosa
+soundfile
+numpy
+torch
+huggingface_hub
