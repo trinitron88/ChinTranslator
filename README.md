@@ -6,12 +6,18 @@ A fine-tuned Whisper model for transcribing Hakha Chin (CNH) speech to text and 
 
 This project fine-tunes OpenAI's Whisper model on Hakha Chin Bible audio to create a speech-to-text system for this low-resource language. The model transcribes Hakha Chin audio and provides automatic translation to English.
 
-**Current Status:** ✅ V4 Model - Production Ready (with limitations)
+It ships in two modes:
+
+- **Batch translator** (`gradio_interface.py`) — record or upload audio, then transcribe and translate. The original record → stop → translate workflow.
+- **Real-time interpreter** (`realtime.py` / the Hugging Face Space) — a continuous, in-ear interpreter that listens, detects pauses, transcribes, translates, and speaks English back over WebRTC a few seconds behind the speaker. See [Real-time interpreter](#-real-time-interpreter) below.
+
+**Current Status:** ✅ V4 Model - Production Ready (with limitations) · 🎧 Real-time interpreter - working prototype
 
 ### Features
 
 - **Speech-to-Text**: Transcribe Hakha Chin audio to text
 - **Translation**: Automatic translation to English
+- **Real-time streaming**: Live, continuous interpretation over WebRTC (mic in, earbud out) — bidirectional Hakha Chin ↔ English
 - **Web Interface**: Easy-to-use Gradio interface
 - **Audio Processing**: Handles uploaded files and microphone input
 - **Sliding Window**: Processes long audio in manageable chunks
@@ -73,7 +79,13 @@ The interface will launch in your browser with a shareable public link.
 ```
 .
 ├── README.md
-├── gradio_interface.py           # Main web interface (optimized)
+├── gradio_interface.py           # Batch web interface (record/upload → translate)
+├── realtime.py                   # Real-time streaming interpreter (FastRTC)
+├── REALTIME.md                   # Real-time interpreter docs & troubleshooting
+├── hf_space/                     # Deployable Hugging Face Space (hosted interpreter)
+│   ├── app.py                    #   Space entrypoint (FastRTC + Gradio)
+│   ├── requirements.txt
+│   └── README.md
 ├── fine-tuning-aligned.py        # Training script
 ├── whisper_alignment_2.py        # Audio-text alignment
 ├── process-matthew.py            # Data preprocessing
@@ -103,6 +115,53 @@ The interface will launch in your browser with a shareable public link.
 4. View results:
    - Hakha Chin transcription
    - English translation
+
+## 🎧 Real-time interpreter
+
+Beyond the batch workflow, the project includes a **streaming interpreter** that
+acts like a live in-ear interpreter: instead of record → stop → translate, it
+listens continuously and speaks the translation into your ear a few seconds
+behind the speaker.
+
+```
+phone browser (mic in, earbud out)
+    ⇅  live audio stream (WebRTC, via FastRTC)
+GPU backend (Colab / cloud / Hugging Face Space):
+    VAD → Chin Whisper → Google Translate → TTS → stream translation back
+```
+
+The phone is just a microphone and a speaker; all the model work stays on the
+GPU, reusing the same fine-tuned model and `cnh` ↔ EN translation as the batch
+app. Direction is switchable (Hakha Chin → English or English → Hakha Chin).
+
+### Two ways to run it
+
+- **`realtime.py`** — run on your own GPU (Colab/cloud). Open the printed share
+  link on your phone, allow the mic, put in a Bluetooth earbud, and start
+  talking. Full setup and troubleshooting in **[REALTIME.md](REALTIME.md)**.
+
+  ```python
+  # In Colab, with Drive mounted and the repo cloned to /content/CT:
+  !cd /content/CT && CHIN_MODEL=/content/drive/MyDrive/ChinTranslator/model_v5/whisper-cnh-turbo-ct2 \
+      python realtime.py
+  ```
+
+- **Hugging Face Space** — `hf_space/` is a deployable Space (FastRTC + Gradio)
+  that hosts the interpreter so you just open a URL. Configure the Space
+  `CHIN_MODEL` variable and `HF_TOKEN` secret, and run it on a **GPU** tier.
+  Details in **[hf_space/README.md](hf_space/README.md)**.
+
+### What to expect
+
+- **Latency ~2–5s** behind the speaker is normal for live interpretation — even
+  human interpreters lag; you won't get instant.
+- **WebRTC connectivity** is the most common first hurdle: a phone on cellular
+  talking to a remote backend needs a **TURN relay**. FastRTC can fetch free
+  TURN credentials from Hugging Face — set `HF_TOKEN` (or provide static TURN
+  creds via `TURN_URLS`). See REALTIME.md if the phone can't connect.
+- **TTS is gTTS** for now (a placeholder that round-trips to Google per phrase);
+  swapping in **Piper** (local neural TTS) is the next step for lower latency.
+- It's a **working prototype**, not a finished product — expect to iterate.
 
 ### Training a New Model
 
@@ -177,6 +236,11 @@ The interface will launch in your browser with a shareable public link.
 - Train dedicated Hakha Chin → English translation model
 - Create community crowdsourcing platform
 
+### Real-time interpreter
+- Swap gTTS → **Piper** (local neural TTS) for sub-second, snappier playback
+- Tune VAD/chunking and surface partial results for lower perceived latency
+- On-device path (whisper.cpp + Piper) so it runs locally, offline, no server
+
 ## 📖 Data Sources
 
 - **Audio**: Faith Comes By Hearing (Hakha Chin Bible)
@@ -212,6 +276,6 @@ For questions or collaboration: [GitHub Issues](https://github.com/trinitron88/C
 
 ---
 
-**Last Updated**: November 5, 2025  
+**Last Updated**: June 10, 2026  
 **Model Version**: V4  
-**Status**: Production Ready (with known limitations)
+**Status**: Batch translator production ready (with known limitations) · Real-time interpreter working prototype
