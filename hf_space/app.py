@@ -70,9 +70,11 @@ def speak(text: str, lang: str):
     try:
         from gtts import gTTS
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
-        gTTS(text=text, lang=lang).save(mp3)
-        audio, sr = librosa.load(mp3, sr=24000, mono=True)
-        os.unlink(mp3)
+        try:
+            gTTS(text=text, lang=lang).save(mp3)
+            audio, sr = librosa.load(mp3, sr=24000, mono=True)
+        finally:
+            os.unlink(mp3)
         pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).reshape(1, -1)
         return sr, pcm
     except Exception as e:
@@ -182,7 +184,7 @@ if _TURN_URLS:
     # by the browser. Give both sides the same static TURN server.
     server_rtc_configuration = _static_turn
     print("[turn] using STATIC TURN from env (TURN_URLS) — client + server")
-else:
+elif _HF:
     # Fallback: HF/Cloudflare async broker (DNS-fails in these sandboxes; kept
     # only so the app still boots without static creds).
     from fastrtc import get_cloudflare_turn_credentials_async
@@ -191,6 +193,11 @@ else:
         return await get_cloudflare_turn_credentials_async(hf_token=_HF)
 
     print("[turn] no TURN_URLS set; falling back to Cloudflare broker (may fail)")
+else:
+    # Without creds the broker would just error per-connection — skip it. STUN
+    # only: works on localhost / same LAN, not across NAT.
+    rtc_configuration = None
+    print("[turn] no TURN_URLS and no HF_TOKEN — WebRTC will only work on the same network")
 
 # On-screen transcript. on_utterance yields AdditionalOutputs(chin, english);
 # this handler appends each turn to the running textbox value.

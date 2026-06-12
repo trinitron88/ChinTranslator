@@ -32,10 +32,13 @@ This is a working skeleton, not a finished product. Known things to expect/fix:
 
 1. **WebRTC connectivity (most likely first hurdle).** A plain share link often
    only connects on the same LAN. For a phone on cellular talking to a Colab
-   backend, WebRTC needs a **TURN relay**. FastRTC can fetch free TURN
-   credentials from Hugging Face — set `HF_TOKEN` in the environment and
-   `realtime.py` will try to use them. If the phone can't connect, this is why;
-   check the current FastRTC docs for the exact TURN helper for your version.
+   backend, WebRTC needs a **TURN relay**. Two options, in order of preference:
+   - **Static TURN creds** — set `TURN_URLS` (comma-separated `turn:` URLs),
+     `TURN_USERNAME`, and `TURN_CREDENTIAL` (e.g. from a free ExpressTURN or
+     Metered account). This is what the HF Space uses; no broker fetch.
+   - **HF/Cloudflare broker** — set `HF_TOKEN` and FastRTC fetches free
+     Cloudflare TURN credentials. This fetch has been flaky (DNS failures);
+     if the phone can't connect, this is why.
 
 2. **Latency ~2–5s** behind the speaker is normal — even human interpreters lag.
    You won't get instant.
