@@ -97,9 +97,11 @@ def speak_en(text_en: str):
     try:
         from gtts import gTTS
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
-        gTTS(text=text, lang="en").save(mp3)
-        audio, sr = librosa.load(mp3, sr=24000, mono=True)  # float32 in [-1, 1]
-        os.unlink(mp3)
+        try:
+            gTTS(text=text, lang="en").save(mp3)
+            audio, sr = librosa.load(mp3, sr=24000, mono=True)  # float32 in [-1, 1]
+        finally:
+            os.unlink(mp3)
         pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).reshape(1, -1)
         return sr, pcm
     except Exception as e:
@@ -137,13 +139,25 @@ def on_utterance(audio):
 
 
 # ---------------- Wire up the stream ----------------
-# WebRTC across networks (phone on cellular → Colab) needs a TURN relay. FastRTC
-# can fetch free credentials from Hugging Face when HF_TOKEN is set; the exact
-# helper name varies by version, so we try a couple and fall back to None (which
-# works on localhost / same LAN). See REALTIME.md if the phone can't connect.
+# WebRTC across networks (phone on cellular → Colab) needs a TURN relay.
+# Preferred: STATIC TURN creds via env (TURN_URLS / TURN_USERNAME /
+# TURN_CREDENTIAL), same scheme as the Space app — the HF/Cloudflare credential
+# broker is the part that keeps DNS-failing. Fallback: broker via HF_TOKEN.
+# With neither, None still works on localhost / same LAN. See REALTIME.md.
 rtc_configuration = None
 _hf = os.environ.get("HF_TOKEN")
-if _hf:
+_turn_urls = os.environ.get("TURN_URLS")
+if _turn_urls:
+    rtc_configuration = {"iceServers": [
+        {"urls": "stun:stun.l.google.com:19302"},
+        {
+            "urls": [u.strip() for u in _turn_urls.split(",") if u.strip()],
+            "username": os.environ.get("TURN_USERNAME", ""),
+            "credential": os.environ.get("TURN_CREDENTIAL", ""),
+        },
+    ]}
+    print("[turn] using STATIC TURN from env (TURN_URLS)")
+elif _hf:
     try:
         # get_hf_turn_credentials is deprecated (and its old endpoint 404s/DNS-fails);
         # FastRTC now brokers free Cloudflare TURN from your HF token.
@@ -156,7 +170,7 @@ if _hf:
     except Exception as e:
         print(f"[turn] TURN setup failed ({e}); cross-network will likely fail.")
 else:
-    print("[turn] HF_TOKEN not set; cross-network will likely fail.")
+    print("[turn] neither TURN_URLS nor HF_TOKEN set; cross-network will likely fail.")
 
 stream = Stream(
     handler=ReplyOnPause(on_utterance),

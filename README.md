@@ -1,281 +1,130 @@
 # Hakha Chin Speech-to-Text Translator
 
-A fine-tuned Whisper model for transcribing Hakha Chin (CNH) speech to text and translating to English. Built to help bridge language barriers in Hakha Chin-speaking communities.
+A fine-tuned Whisper model for transcribing Hakha Chin (`cnh`) speech and
+translating it to English. Built to help bridge language barriers in Hakha
+Chin-speaking communities.
 
 ## 🎯 Overview
 
-This project fine-tunes OpenAI's Whisper model on Hakha Chin Bible audio to create a speech-to-text system for this low-resource language. The model transcribes Hakha Chin audio and provides automatic translation to English.
+**Current status: V5** — a LoRA fine-tune of `openai/whisper-large-v3-turbo`
+trained on the [Common Voice](https://commonvoice.mozilla.org/) Hakha Chin
+dataset (community-recorded, pre-aligned utterances with validated
+transcripts). Earlier versions (V1–V4) trained on Bible audio; that data and
+its alignment pipeline are retired to `archive/` — Common Voice gives cleaner
+alignment, more speakers, and conversational vocabulary.
 
-It ships in two modes:
+There are three ways to use the model:
 
-- **Batch translator** (`gradio_interface.py`) — record or upload audio, then transcribe and translate. The original record → stop → translate workflow.
-- **Real-time interpreter** (`realtime.py` / the Hugging Face Space) — a continuous, in-ear interpreter that listens, detects pauses, transcribes, translates, and speaks English back over WebRTC a few seconds behind the speaker. See [Real-time interpreter](#-real-time-interpreter) below.
+| App | What it does |
+|-----|--------------|
+| `gradio_interface.py` | Batch: upload/record audio → Chin transcript + English translation + spoken English |
+| `realtime.py` | Streaming prototype: phone mic → GPU backend → English in your earbud a few seconds behind the speaker (see [REALTIME.md](REALTIME.md)) |
+| `hf_space/` | The realtime app packaged for Hugging Face Spaces (WebRTC + TURN work there; Colab can't carry WebRTC media) |
 
-**Current Status:** ✅ V4 Model - Production Ready (with limitations) · 🎧 Real-time interpreter - working prototype
+Translation is Google Translate's endpoint called directly with the source
+pinned to `cnh` (deep-translator's language list lacks Hakha Chin, and
+autodetect misreads it). TTS is gTTS.
 
-### Features
-
-- **Speech-to-Text**: Transcribe Hakha Chin audio to text
-- **Translation**: Automatic translation to English
-- **Real-time streaming**: Live, continuous interpretation over WebRTC (mic in, earbud out) — bidirectional Hakha Chin ↔ English
-- **Web Interface**: Easy-to-use Gradio interface
-- **Audio Processing**: Handles uploaded files and microphone input
-- **Sliding Window**: Processes long audio in manageable chunks
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.8+
-- GPU recommended (CUDA support for faster processing)
-- ~2GB disk space for model files
-
-### Installation
+## 🚀 Quick start
 
 ```bash
-# Clone the repository
-git clone https://github.com/trinitron88/ChinTranslator2.git
-cd ChinTranslator2
+git clone https://github.com/trinitron88/ChinTranslator.git
+cd ChinTranslator
 
-# Install dependencies
-pip install torch transformers gradio librosa deep-translator soundfile numpy
-```
-
-### Running the Interface
-
-```bash
+# Serve the batch app (downloads stock large-v3 if CHIN_MODEL is unset)
 python gradio_interface.py
+
+# Serve the fine-tuned model (after training + export, see below)
+CHIN_MODEL=whisper-cnh-turbo-ct2 python gradio_interface.py
 ```
 
-The interface will launch in your browser with a shareable public link.
+Scripts self-install their Python dependencies on first run (they're built to
+be `!python`-run from Colab cells). `gradio_interface.py` also needs **ffmpeg**
+on the PATH (`apt install ffmpeg` / `brew install ffmpeg`).
 
-## 📊 Model Performance
+## 🔧 Training pipeline (V5)
 
-### V4 Model (Current)
-- **Training Data**: 1,375 segments from 44 Bible chapters (Mark & Matthew)
-- **Validation Data**: 344 segments
-- **Training Loss**: 6.47 → 2.0 (smooth descent)
-- **Estimated Accuracy**: 60-70% on biblical text
+Designed for a free Colab T4 (16 GB). The base model is frozen and loaded in
+8-bit; only small LoRA adapters train — minutes per epoch, and it resists
+overfitting on a ~1.3k-clip dataset.
 
-### Known Limitations
+```bash
+python prepare_data.py     # fetch Common Voice cnh → data/cv_cnh/ (HF DatasetDict)
+python train.py            # LoRA fine-tune → whisper-cnh-turbo-lora/ (adapter)
+python export_model.py     # merge adapter + convert → whisper-cnh-turbo-ct2/ (CTranslate2)
+```
 
-1. **Training Data Constraints**:
-   - All male narrators (Bible speakers only)
-   - Biblical/formal vocabulary domain
-   - Read speech, not conversational
-   - Single audio source
+On Colab with Drive mounted, `train.py`/`export_model.py` default their outputs
+into `/content/drive/MyDrive/ChinTranslator/` so a runtime reset doesn't eat
+the model. Explicit `--out`/`--adapter` flags always win.
 
-2. **Performance**:
-   - Processing speed: ~3-4x real-time on GPU
-   - Lower accuracy on non-biblical conversational speech
-   - Reduced accuracy on female voices
+The export step exists because the serving apps use
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2),
+which understands neither PEFT adapters nor raw HF checkpoints: the adapter is
+merged into full-precision base weights, then converted to CT2 format.
 
-3. **Domain**:
-   - Best for biblical or formal Hakha Chin
-   - Limited modern/conversational vocabulary
-
-## 🔧 Project Structure
+## 📁 Project structure
 
 ```
 .
-├── README.md
-├── gradio_interface.py           # Batch web interface (record/upload → translate)
-├── realtime.py                   # Real-time streaming interpreter (FastRTC)
-├── REALTIME.md                   # Real-time interpreter docs & troubleshooting
-├── hf_space/                     # Deployable Hugging Face Space (hosted interpreter)
-│   ├── app.py                    #   Space entrypoint (FastRTC + Gradio)
-│   ├── requirements.txt
-│   └── README.md
-├── fine-tuning-aligned.py        # Training script
-├── whisper_alignment_2.py        # Audio-text alignment
-├── process-matthew.py            # Data preprocessing
-├── continue_training.py          # Continue training existing model
-├── aligned_train_data.json       # Training segments (1,375)
-├── aligned_val_data.json         # Validation segments (344)
-├── Audio/                        # Audio files (mark_*.mp3, matt_*.mp3)
-├── Text/                         # Text transcripts (*.txt)
-└── whisper-hakha-chin/          # Fine-tuned model (V4)
+├── prepare_data.py        # Common Voice cnh → data/cv_cnh/ DatasetDict
+├── train.py               # LoRA + 8-bit fine-tune of whisper-large-v3-turbo
+├── export_model.py        # merge adapter → convert to CTranslate2
+├── gradio_interface.py    # batch web app (upload/record → transcript + translation)
+├── realtime.py            # streaming in-ear interpreter prototype (FastRTC)
+├── REALTIME.md            # realtime architecture, setup, roadmap
+├── hf_space/              # Hugging Face Space (realtime app + deploy script)
+│   ├── app.py             #   Spaces entrypoint (direction toggle, mic sensitivity, transcript)
+│   └── deploy_colab.py    #   push hf_space/ to the Space from Colab
+├── ChinTranslator_V5_Colab.ipynb   # one-stop Colab notebook for the pipeline
+└── archive/               # retired Bible-data pipeline (V1–V4) + superseded scripts
 ```
 
-## 📚 Usage
+## 🛠️ Technical details
 
-### Web Interface
+- **Base model**: `openai/whisper-large-v3-turbo` (0.8B), frozen, 8-bit
+- **Adapter**: LoRA r=32, α=64, dropout 0.05 on `q_proj`/`v_proj`
+- **Task**: `transcribe` only — Whisper has no `cnh` language token, so the
+  model is trained task-only and outputs Chin text, which is then translated
+- **Data**: Common Voice 17 `cnh`, official train+dev pooled and re-split 80/20
+  (the official dev split is abnormally large); clips under 0.3 s dropped
+- **Serving**: faster-whisper / CTranslate2, float16 on GPU, int8 on CPU
 
-1. Launch the Gradio interface:
-   ```bash
-   python gradio_interface.py
-   ```
+## 🌐 Hugging Face Space (realtime)
 
-2. Choose input method:
-   - **Upload Audio**: Upload an audio file (MP3, WAV, etc.)
-   - **Record Audio**: Use your microphone to record
+The Space (`bsantisi/chin-realtime`) serves the streaming interpreter with a
+Chin↔English direction toggle and a mic-sensitivity slider (helps AirPods /
+quiet Bluetooth mics). Configuration via Space settings:
 
-3. Click "Transcribe & Translate"
+- **Variable `CHIN_MODEL`** — HF repo id of the uploaded CT2 model
+- **Secret `HF_TOKEN`** — model download + Cloudflare TURN broker fallback
+- **Secrets `TURN_URLS` / `TURN_USERNAME` / `TURN_CREDENTIAL`** — preferred
+  static TURN relay (e.g. a free ExpressTURN/Metered account); the broker
+  fetch is unreliable
 
-4. View results:
-   - Hakha Chin transcription
-   - English translation
+Deploy from Colab with `hf_space/deploy_colab.py`.
 
-## 🎧 Real-time interpreter
+## 🔄 Model versions
 
-Beyond the batch workflow, the project includes a **streaming interpreter** that
-acts like a live in-ear interpreter: instead of record → stop → translate, it
-listens continuously and speaks the translation into your ear a few seconds
-behind the speaker.
+| Version | Data | Status | Notes |
+|---------|------|--------|-------|
+| V1–V3 | Bible audio (Mark/Matthew) | ❌ retired | alignment pipeline, repetition/alignment failures |
+| V4 | Bible audio, 1,375 segments | ❌ superseded | worked, but male read-speech, biblical domain only |
+| **V5** | Common Voice `cnh` | ✅ **current** | LoRA on large-v3-turbo, conversational data, many speakers |
 
-```
-phone browser (mic in, earbud out)
-    ⇅  live audio stream (WebRTC, via FastRTC)
-GPU backend (Colab / cloud / Hugging Face Space):
-    VAD → Chin Whisper → Google Translate → TTS → stream translation back
-```
+## 🚀 Roadmap
 
-The phone is just a microphone and a speaker; all the model work stays on the
-GPU, reusing the same fine-tuned model and `cnh` ↔ EN translation as the batch
-app. Direction is switchable (Hakha Chin → English or English → Hakha Chin).
-
-### Two ways to run it
-
-- **`realtime.py`** — run on your own GPU (Colab/cloud). Open the printed share
-  link on your phone, allow the mic, put in a Bluetooth earbud, and start
-  talking. Full setup and troubleshooting in **[REALTIME.md](REALTIME.md)**.
-
-  ```python
-  # In Colab, with Drive mounted and the repo cloned to /content/CT:
-  !cd /content/CT && CHIN_MODEL=/content/drive/MyDrive/ChinTranslator/model_v5/whisper-cnh-turbo-ct2 \
-      python realtime.py
-  ```
-
-- **Hugging Face Space** — `hf_space/` is a deployable Space (FastRTC + Gradio)
-  that hosts the interpreter so you just open a URL. Configure the Space
-  `CHIN_MODEL` variable and `HF_TOKEN` secret, and run it on a **GPU** tier.
-  Details in **[hf_space/README.md](hf_space/README.md)**.
-
-### What to expect
-
-- **Latency ~2–5s** behind the speaker is normal for live interpretation — even
-  human interpreters lag; you won't get instant.
-- **WebRTC connectivity** is the most common first hurdle: a phone on cellular
-  talking to a remote backend needs a **TURN relay**. FastRTC can fetch free
-  TURN credentials from Hugging Face — set `HF_TOKEN` (or provide static TURN
-  creds via `TURN_URLS`). See REALTIME.md if the phone can't connect.
-- **TTS is gTTS** for now (a placeholder that round-trips to Google per phrase);
-  swapping in **Piper** (local neural TTS) is the next step for lower latency.
-- It's a **working prototype**, not a finished product — expect to iterate.
-
-### Training a New Model
-
-1. Prepare your data:
-   - Audio files in `Audio/` directory
-   - Corresponding text files in `Text/` directory
-   - Use naming convention: `book_chapter.mp3` and `book_chapter.txt`
-
-2. Align audio and text:
-   ```bash
-   python whisper_alignment_2.py
-   ```
-
-3. Train the model:
-   ```bash
-   python fine-tuning-aligned.py
-   ```
-
-4. Model will be saved to `./whisper-hakha-chin/`
-
-## 🛠️ Technical Details
-
-### Model Architecture
-- **Base Model**: OpenAI Whisper Small (244M parameters)
-- **Task**: Transcription (not translation)
-- **Language**: Hakha Chin (forced, no language token)
-- **Approach**: Fine-tuning with frozen encoder, trainable decoder
-
-### Training Configuration
-- **Epochs**: 5
-- **Batch Size**: 4 (effective 16 with gradient accumulation)
-- **Learning Rate**: 1e-5
-- **Optimizer**: AdamW
-- **Mixed Precision**: FP16 (on GPU)
-
-### Audio Processing
-- **Sample Rate**: 16kHz (mono)
-- **Segmentation**: Non-silence detection
-- **Window**: 30-second sliding windows with overlap
-- **Normalization**: Automatic volume adjustment
-
-### Translation
-- **Method**: Google Translate API (via deep-translator)
-- **Source**: Hakha Chin (CNH) or auto-detect
-- **Target**: English
-
-## 🔄 Model Versions
-
-| Version | Chapters | Segments | Status | Notes |
-|---------|----------|----------|--------|-------|
-| V1 | Mark | - | ❌ Abandoned | Severe repetition, undertrained |
-| V2 | Mark (16) | 540 | ✅ Working | Good baseline, limited vocabulary |
-| V3 | Mark + Matthew | 1,517 | ❌ Failed | Bad alignment, multilingual gibberish |
-| V4 | Mark + Matthew (44) | 1,375 | ✅ **Current** | Proper alignment, production ready |
-
-## 🚀 Future Improvements
-
-### Immediate
-- Field test with native speakers
-- Collect accuracy metrics on real conversations
-- Optimize processing speed
-
-### Short Term
-- Expand to all 260+ available Bible chapters
-- Add data augmentation (speed, pitch, noise)
-- Test on diverse audio conditions
-
-### Long Term
-- Collect conversational Hakha Chin data
-- Add female and diverse speakers
-- Implement speaker diarization
-- Train dedicated Hakha Chin → English translation model
-- Create community crowdsourcing platform
-
-### Real-time interpreter
-- Swap gTTS → **Piper** (local neural TTS) for sub-second, snappier playback
-- Tune VAD/chunking and surface partial results for lower perceived latency
-- On-device path (whisper.cpp + Piper) so it runs locally, offline, no server
-
-## 📖 Data Sources
-
-- **Audio**: Faith Comes By Hearing (Hakha Chin Bible)
-- **Text**: YouVersion Bible (Hakha Chin)
-- **Books**: Gospel of Mark (16 chapters), Gospel of Matthew (28 chapters)
-
-## 🤝 Contributing
-
-Contributions welcome! Areas of interest:
-- Additional training data (conversational Hakha Chin)
-- Performance optimizations
-- Accuracy improvements
-- UI/UX enhancements
-- Documentation
+- Piper TTS in the realtime path (gTTS round-trips to Google per phrase)
+- Partial/streaming results and VAD tuning for lower latency
+- On-device (whisper.cpp + Piper) — offline, no server
+- More training data; field testing with native speakers
 
 ## 📝 License
 
-This project is for educational and language preservation purposes. Please respect the licenses of:
-- OpenAI Whisper (Apache 2.0)
-- Bible audio and text sources
-- Transformers library (Apache 2.0)
-
-## 🙏 Acknowledgments
-
-- OpenAI for the Whisper model
-- Faith Comes By Hearing for Hakha Chin Bible audio
-- YouVersion for Hakha Chin Bible text
-- The Hakha Chin community
+For educational and language-preservation purposes. Please respect the
+licenses of OpenAI Whisper (Apache 2.0), Mozilla Common Voice (CC-0), and the
+Transformers ecosystem (Apache 2.0).
 
 ## 📧 Contact
 
-For questions or collaboration: [GitHub Issues](https://github.com/trinitron88/ChinTranslator2/issues)
-
----
-
-**Last Updated**: June 10, 2026  
-**Model Version**: V4  
-**Status**: Batch translator production ready (with known limitations) · Real-time interpreter working prototype
+[GitHub Issues](https://github.com/trinitron88/ChinTranslator/issues)

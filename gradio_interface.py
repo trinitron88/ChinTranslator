@@ -80,7 +80,10 @@ def silero_vad_windows(audio_path, sr_target=16000, min_sil_ms=500, pad_ms=140, 
     sr = sr_target
     samples = wav.squeeze(0)
 
-    torch.hub.set_dir('/content/torchhub')  # harmless outside Colab
+    # Only redirect the hub cache on Colab — elsewhere creating /content needs
+    # root, and torch.hub.load would die on the mkdir before even downloading.
+    if os.path.isdir("/content"):
+        torch.hub.set_dir('/content/torchhub')
     model, utils = torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
     get_speech_timestamps = utils[0]
 
@@ -99,10 +102,20 @@ def silero_vad_windows(audio_path, sr_target=16000, min_sil_ms=500, pad_ms=140, 
 
 def slice_to_wav(full_path, start_s, end_s):
     out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-    subprocess.run([
-        "ffmpeg", "-y", "-i", full_path, "-ss", f"{start_s:.3f}", "-to", f"{end_s:.3f}",
-        "-ac", "1", "-ar", "16000", out
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        r = subprocess.run([
+            "ffmpeg", "-y", "-i", full_path, "-ss", f"{start_s:.3f}", "-to", f"{end_s:.3f}",
+            "-ac", "1", "-ar", "16000", out
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except FileNotFoundError:
+        os.unlink(out)
+        raise RuntimeError("ffmpeg not found — install it (apt/brew install ffmpeg)")
+    if r.returncode:
+        os.unlink(out)
+        lines = r.stderr.decode(errors="replace").strip().splitlines()
+        raise RuntimeError(
+            f"ffmpeg failed slicing {full_path} [{start_s:.2f}–{end_s:.2f}s]: "
+            f"{lines[-1] if lines else 'no error output'}")
     return out
 
 def looks_garbage(txt, non_ascii_ratio=0.30, min_ascii_chars=12):

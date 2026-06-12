@@ -21,6 +21,9 @@ data/
 # Training outputs (LoRA adapter / merged model)
 whisper-cnh-*/
 
+# Locally saved adapter checkpoints (e.g. "Eval Loss 0.4/")
+Eval Loss*/
+
 # Python bytecode
 __pycache__/
 *.pyc
