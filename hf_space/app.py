@@ -15,6 +15,7 @@ Dependencies are installed from requirements.txt at build time.
 import os
 import json
 import tempfile
+from collections import deque
 
 import numpy as np
 import librosa
@@ -202,7 +203,11 @@ else:
     print("[turn] no TURN_URLS and no HF_TOKEN — WebRTC will only work on the same network")
 
 # On-screen transcript. on_utterance yields AdditionalOutputs(chin, english);
-# this handler appends each turn to the running textbox value.
+# _update_transcript appends each turn to a server-side history (below) and
+# returns the joined text, so the box scrolls instead of being replaced.
+# Bounded so a long session doesn't grow the textbox value without limit.
+_transcript_history = deque(maxlen=100)
+
 transcript_box = gr.Textbox(
     label="📝 Transcript (source → translation)",
     value="",
@@ -215,8 +220,13 @@ transcript_box = gr.Textbox(
 
 
 def _update_transcript(current: str, chin: str, english: str) -> str:
-    entry = f"🗣️ {chin}\n🔤 {english}"
-    return f"{current}\n\n{entry}".strip() if current else entry
+    # Accumulate the transcript server-side so it reliably scrolls (newest at
+    # the bottom) instead of being replaced each turn. Relying on `current`
+    # (the component value threaded back in) proved flaky over the WebRTC
+    # stream, so we keep our own bounded history. Single-user Space, so a
+    # module-level buffer is fine — same pattern as SETTINGS/vad_options.
+    _transcript_history.append(f"🗣️ {chin}\n🔤 {english}")
+    return "\n\n".join(_transcript_history)
 
 
 stream = Stream(
