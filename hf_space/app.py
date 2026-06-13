@@ -141,19 +141,21 @@ def on_utterance(audio):
     lang = getattr(info, "language", "") or ""
     lang_prob = getattr(info, "language_probability", 0.0) or 0.0
     print(f"[lang] dir={SETTINGS['direction']} detected={lang!r} p={lang_prob:.2f}", flush=True)
-    # In Chin→English mode, drop English input: don't echo it, and break the
-    # TTS→mic feedback loop. (Not applied in English→Chin mode, where English
-    # is the expected input.)
-    if (SETTINGS["direction"] == "cnh2en" and SKIP_ENGLISH
-            and lang == "en" and lang_prob >= EN_SKIP_PROB):
-        print(f"EN-SKIP: {src_text!r}", flush=True)
-        yield AdditionalOutputs(src_text, "(English detected — not spoken)")
-        return
+    # In Chin→English mode, when the input is English we skip only the AUDIO
+    # output — this breaks the TTS→mic feedback loop (the English we'd speak
+    # won't get re-transcribed and echoed). The text translation is shown
+    # exactly as usual. (Not applied in English→Chin mode, where English is the
+    # expected input.)
+    skip_audio = (SETTINGS["direction"] == "cnh2en" and SKIP_ENGLISH
+                  and lang == "en" and lang_prob >= EN_SKIP_PROB)
     out_text = translate(src_text, cfg["sl"], cfg["tl"])
     print(f"{cfg['sl'].upper()}: {src_text!r}  →  {cfg['tl'].upper()}: {out_text!r}", flush=True)
     # Push the text to the on-screen transcript first, so it appears even if TTS
-    # fails or is skipped (e.g. no Chin voice).
+    # fails or is skipped (e.g. no Chin voice, or English-input audio skip).
     yield AdditionalOutputs(src_text, out_text)
+    if skip_audio:
+        print(f"EN-SKIP (audio only): {src_text!r}", flush=True)
+        return
     audio_out = speak(out_text, cfg["tts"])
     if audio_out is not None:
         yield audio_out
