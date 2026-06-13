@@ -22,7 +22,7 @@ import subprocess
 # --- config ------------------------------------------------------------------
 REPO_DIR = os.environ.get("CT_REPO_DIR", "/content/CT")
 REPO_URL = "https://github.com/trinitron88/ChinTranslator.git"  # new location
-BRANCH = os.environ.get("CT_BRANCH", "realtime")
+BRANCH = os.environ.get("CT_BRANCH", "main")
 SPACE_REPO_ID = "bsantisi/chin-realtime"
 
 
