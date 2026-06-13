@@ -276,6 +276,14 @@ with demo:
         " padding-bottom: 56px !important; }"
         ".audio-container .gradio-webrtc-waveContainer {"
         " margin-top: -34px !important; }"
+        # Battery saver: when <body> has the cc-battery-saver class, hide the
+        # audio-reactive waveform and pause any CSS animations inside it. We use
+        # visibility:hidden (not display:none) so the flex box is preserved and
+        # the Record button stays pinned to the bottom via space-between.
+        "body.cc-battery-saver .gradio-webrtc-waveContainer {"
+        " visibility: hidden !important; }"
+        "body.cc-battery-saver .gradio-webrtc-waveContainer * {"
+        " animation-play-state: paused !important; }"
         "</style>"
     )
     direction = gr.Radio(
@@ -292,6 +300,20 @@ with demo:
         info="Raise for AirPods / quiet mics: detects quieter speech and boosts input gain.",
     )
     sensitivity.change(_apply_sensitivity, inputs=sensitivity, outputs=None)
+    # Battery saver: hides the continuously-redrawn audio waveform, the biggest
+    # cosmetic battery drain on phones. Toggled entirely client-side (no server
+    # round-trip) by flipping a class on <body>; the CSS above does the rest.
+    battery_saver = gr.Checkbox(
+        value=False,
+        label="🔋 Battery saver",
+        info="Hides the waveform animation to save phone battery. Recording still works.",
+    )
+    battery_saver.change(
+        fn=None,
+        inputs=battery_saver,
+        outputs=None,
+        js="(on) => { document.body.classList.toggle('cc-battery-saver', on); }",
+    )
 
 if __name__ == "__main__":
     demo.launch()
