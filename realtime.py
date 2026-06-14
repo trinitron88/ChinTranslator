@@ -52,11 +52,15 @@ from fastrtc import Stream, ReplyOnPause  # noqa: E402
 
 # ---------------- Model ----------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL_NAME = os.environ.get("CHIN_MODEL", "large-v3")
+# Stock fallback matches the trained base (large-v3-turbo) but is NOT fine-tuned
+# — it knows no Hakha Chin. Set CHIN_MODEL to your CT2 model in real use.
+STOCK_FALLBACK = "large-v3-turbo"
+MODEL_NAME = os.environ.get("CHIN_MODEL", STOCK_FALLBACK)
 print("=" * 64)
 print(f"  Real-time Chin→EN  |  MODEL: {MODEL_NAME}  |  DEVICE: {DEVICE}")
-if MODEL_NAME == "large-v3":
-    print("  ⚠️  stock large-v3 (NOT fine-tuned). Set CHIN_MODEL=.../whisper-cnh-turbo-ct2")
+if MODEL_NAME == STOCK_FALLBACK:
+    print(f"  ⚠️  stock {STOCK_FALLBACK} (NOT fine-tuned, knows no Hakha Chin). "
+          f"Set CHIN_MODEL=.../whisper-cnh-turbo-ct2")
 print("=" * 64)
 MODEL = WhisperModel(MODEL_NAME, device=DEVICE,
                      compute_type="float16" if DEVICE == "cuda" else "int8")

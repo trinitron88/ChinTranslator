@@ -27,8 +27,33 @@ from fastrtc import (
 )
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# Set CHIN_MODEL to your CT2 model repo id; faster-whisper downloads it from HF.
-MODEL_NAME = os.environ.get("CHIN_MODEL", "openai/whisper-large-v3")
+
+# CHIN_MODEL must be an HF *model-repo id* for the fine-tuned CT2 model (the Space
+# runs on HF infra and can't read a Drive path). faster-whisper downloads it.
+#
+# Hard-fail when it's unset instead of silently loading stock Whisper. Stock
+# whisper-large-v3 has NO Hakha Chin training, so it produces garbage Chin
+# transcripts that look like a translation bug — this exact misconfiguration
+# (CHIN_MODEL unset → stock fallback) silently broke the Space before. Refusing
+# to start surfaces the problem in the Space logs immediately. Set ALLOW_STOCK=1
+# only to intentionally demo the base model. Use hf_space/upload_model.py to
+# publish your CT2 model and get the repo id to set here.
+MODEL_NAME = os.environ.get("CHIN_MODEL")
+if not MODEL_NAME:
+    if os.environ.get("ALLOW_STOCK") == "1":
+        MODEL_NAME = "openai/whisper-large-v3"
+        print("⚠️  CHIN_MODEL unset and ALLOW_STOCK=1 → serving STOCK "
+              "openai/whisper-large-v3, which has NO Hakha Chin training. "
+              "Transcripts WILL be garbage; this is for base-model demos only.")
+    else:
+        raise SystemExit(
+            "❌ CHIN_MODEL is not set. This Space must point at your fine-tuned "
+            "Hakha Chin CT2 model repo — set the Space Variable\n"
+            "    CHIN_MODEL = <user>/whisper-cnh-turbo-ct2\n"
+            "(publish the model with hf_space/upload_model.py first). Refusing to "
+            "start on stock Whisper, which knows no Hakha Chin and silently emits "
+            "garbage. Set ALLOW_STOCK=1 only to intentionally demo the base model."
+        )
 print(f"Loading model: {MODEL_NAME} on {DEVICE}")
 MODEL = WhisperModel(MODEL_NAME, device=DEVICE,
                      compute_type="float16" if DEVICE == "cuda" else "int8")
