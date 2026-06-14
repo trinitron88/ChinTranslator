@@ -158,17 +158,24 @@ _apply_sensitivity(_DEFAULT_SENSITIVITY)
 # Any failure logs once and passes audio through — denoise never breaks a turn.
 DENOISE = os.environ.get("DENOISE", "noisereduce").lower()
 DENOISE_AMOUNT = float(os.environ.get("DENOISE_AMOUNT", "0.85"))
+# Stationary mode estimates one noise profile for the whole clip — far faster
+# than non-stationary and a good fit for steady ambient noise (fans/hum/traffic).
+# Set DENOISE_STATIONARY=0 for fluctuating noise (slower).
+DENOISE_STATIONARY = os.environ.get("DENOISE_STATIONARY", "1") != "0"
 _dn = {"model": None, "state": None, "sr": 48000, "ready": False, "warned": False}
 
 
 def denoise(samples, sr):
-    """samples: float32 mono in [-1, 1] at `sr`. Returns (clean_samples, sr_out).
+    """Suppress ambient noise. samples: float32 mono in [-1, 1] at `sr`; returns
+    cleaned samples at the SAME sr.
 
-    DeepFilterNet runs at 48 kHz so it may change the rate; the caller resamples
-    to 16 kHz afterward regardless.
+    Called on the 16 kHz signal the model sees: doing it at the 48 kHz native
+    rate in non-stationary mode was slow enough to back the queue up indefinitely
+    (the transcript rides additional_outputs on that queue, so it stalled). Any
+    failure logs once and passes audio through — denoise never breaks a turn.
     """
     if DENOISE in ("off", "0", "none", "") or samples.size == 0:
-        return samples, sr
+        return samples
     try:
         if DENOISE == "df":
             if not _dn["ready"]:
@@ -178,23 +185,24 @@ def denoise(samples, sr):
                 _dn["ready"] = True
             import torch as _torch
             from df.enhance import enhance
-            tgt = _dn["sr"]
+            tgt = _dn["sr"]  # DeepFilterNet runs at 48 kHz; up/downsample around it
             audio = (samples if sr == tgt
                      else librosa.resample(samples, orig_sr=sr, target_sr=tgt))
             clean = enhance(_dn["model"], _dn["state"],
                             _torch.from_numpy(audio).unsqueeze(0))
-            return clean.squeeze(0).cpu().numpy().astype(np.float32), tgt
-        # default: noisereduce spectral gating (non-stationary adapts to changing noise)
+            clean = clean.squeeze(0).cpu().numpy().astype(np.float32)
+            return (clean if sr == tgt
+                    else librosa.resample(clean, orig_sr=tgt, target_sr=sr))
         import noisereduce as nr
         clean = nr.reduce_noise(y=samples, sr=sr, prop_decrease=DENOISE_AMOUNT,
-                                stationary=False)
-        return clean.astype(np.float32), sr
+                                stationary=DENOISE_STATIONARY)
+        return clean.astype(np.float32)
     except Exception as e:  # noqa: BLE001
         if not _dn["warned"]:
             print(f"[denoise] backend {DENOISE!r} unavailable ({e}); "
                   f"passing audio through.", flush=True)
             _dn["warned"] = True
-        return samples, sr
+        return samples
 
 
 def on_utterance(audio):
@@ -203,14 +211,15 @@ def on_utterance(audio):
     peak = np.max(np.abs(samples)) if samples.size else 0.0
     if peak > 1.0:
         samples = samples / 32768.0
-    # Suppress ambient noise on the native-rate signal, before gain/downsample
-    # (boosting cleaned speech beats boosting the noise along with it).
-    samples, sr = denoise(samples, sr)
     gain = SETTINGS["gain"]
     if gain != 1.0:
         samples = np.clip(samples * gain, -1.0, 1.0)
     if sr != 16000:
         samples = librosa.resample(samples, orig_sr=sr, target_sr=16000)
+        sr = 16000
+    # Suppress ambient noise on the 16 kHz signal the model sees — cheap here;
+    # at the 48 kHz native rate it was slow enough to back up the queue.
+    samples = denoise(samples, sr)
     cfg = DIRECTIONS[SETTINGS["direction"]]
     asr_kwargs = {"task": "transcribe", "beam_size": 5, "vad_filter": False}
     if cfg["asr_lang"]:
