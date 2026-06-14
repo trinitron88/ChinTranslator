@@ -373,7 +373,8 @@ with demo:
         ".button-wrap.full-screen { gap: var(--size-7) !important;"
         " flex-wrap: wrap !important; justify-content: center !important; }"
         ".button-wrap .mute-button {"
-        " padding: var(--size-2) var(--size-4) !important; }"
+        " padding: var(--size-2) var(--size-4) !important;"
+        " border-radius: var(--radius-lg) !important; }"
         "</style>"
     )
     direction = gr.Radio(
