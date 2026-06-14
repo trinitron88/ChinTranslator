@@ -9,6 +9,8 @@ Reduce realtime latency, network calls, and phone battery drain in `hf_space/app
 
 ## Implementation notes
 - Work primarily in `hf_space/app.py`.
+- Add a visible UI version stamp near the title/controls, e.g. `v5-cache-YYYYMMDD` or an `APP_VERSION` env var fallback.
+- Include the version stamp in logs at startup so screenshots and Space logs identify the build.
 - Add normalized-text cache keys for translation:
   - key: `(normalized_text, source_lang, target_lang)`
   - normalize by trimming and collapsing whitespace.
@@ -22,12 +24,16 @@ Reduce realtime latency, network calls, and phone battery drain in `hf_space/app
 - Add lightweight cache-hit/miss logging only if it is not too noisy, preferably env-gated.
 
 ## Acceptance criteria
+- UI displays a visible app/build version during field tests.
+- Startup logs include the same version string.
 - Repeated identical utterances avoid duplicate Google Translate requests.
 - Repeated identical TTS phrases avoid regenerating MP3 output.
 - App still works in Hugging Face Spaces without persistent filesystem.
-- No change to the external UI is required.
+- No disruptive UI layout change is required.
 
 ## Suggested validation
+- Launch the Space and confirm the version is visible on mobile.
+- Confirm startup logs include the version string.
 - Run or import `hf_space/app.py` enough to confirm syntax/imports.
 - Manually call translation twice with the same text and confirm the second call uses cache or cache stats increment.
 - Manually call TTS twice with the same text if TTS cache is implemented.
