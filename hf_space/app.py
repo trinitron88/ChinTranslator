@@ -61,6 +61,9 @@ print("✓ Model loaded.")
 
 CHIN_CODE = "cnh"
 
+APP_VERSION = os.environ.get("APP_VERSION", "v5.0.1")
+print(f"[app] version={APP_VERSION}", flush=True)
+
 # Skip translating/speaking when the input is detected as English. Besides being
 # the requested behavior, this breaks the TTS→mic feedback loop (the English we
 # speak won't get re-transcribed and echoed). Tunable via env: SKIP_ENGLISH=0
@@ -332,7 +335,7 @@ stream = Stream(
     server_rtc_configuration=server_rtc_configuration,
     # Short, one-line title so it doesn't wrap and overlap the record button
     # on mobile.
-    ui_args={"title": "Hahka Chin Audio Translator"},
+    ui_args={"title": "Hakha Chin Audio Translator"},
 )
 
 # Spaces (gradio SDK) serves this `demo` object. Append a mic-sensitivity slider;
@@ -375,8 +378,11 @@ with demo:
         ".button-wrap .mute-button {"
         " padding: var(--size-2) var(--size-4) !important;"
         " border-radius: var(--radius-lg) !important; }"
+        ".app-version { font-size: 0.85rem; opacity: 0.7; text-align: center;"
+        " margin: -0.25rem 0 0.75rem; }"
         "</style>"
     )
+    gr.HTML(f"<div class='app-version'>Build: {APP_VERSION}</div>")
     direction = gr.Radio(
         choices=[("Hakha Chin → English", "cnh2en"),
                  ("English → Hakha Chin", "en2cnh")],
