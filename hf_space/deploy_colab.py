@@ -22,8 +22,13 @@ import subprocess
 # --- config ------------------------------------------------------------------
 REPO_DIR = os.environ.get("CT_REPO_DIR", "/content/CT")
 REPO_URL = "https://github.com/trinitron88/ChinTranslator.git"  # new location
+# main is the trunk; deploy from it so the Space gets the current hf_space/ code
+# (the CHIN_MODEL hard-fail + upload_model.py live here, not on stale realtime).
 BRANCH = os.environ.get("CT_BRANCH", "main")
-SPACE_REPO_ID = "bsantisi/chin-realtime"
+# Owner defaults to HF_USER (then "bsantisi"); a fresh Colab only needs the write
+# token. Override the whole id with SPACE_REPO_ID if needed.
+HF_USER = os.environ.get("HF_USER", "bsantisi")
+SPACE_REPO_ID = os.environ.get("SPACE_REPO_ID", f"{HF_USER}/chin-realtime")
 
 
 def _resolve_hf_token() -> str:

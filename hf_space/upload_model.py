@@ -26,7 +26,10 @@ import os
 
 # Defaults match export_model.py's Drive conventions (model_v5/ per session memory).
 DEFAULT_MODEL_DIR = "/content/drive/MyDrive/ChinTranslator/model_v5/whisper-cnh-turbo-ct2"
-DEFAULT_REPO = "bsantisi/whisper-cnh-turbo-ct2"
+# Repo owner defaults to HF_USER (then "bsantisi") so a fresh Colab only needs
+# the write token set, not the username re-entered each session. --repo overrides.
+HF_USER = os.environ.get("HF_USER", "bsantisi")
+DEFAULT_REPO = f"{HF_USER}/whisper-cnh-turbo-ct2"
 
 
 def _resolve_hf_token() -> str:
