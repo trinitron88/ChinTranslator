@@ -301,6 +301,15 @@ with demo:
         " padding-bottom: 56px !important; }"
         ".audio-container .gradio-webrtc-waveContainer {"
         " margin-top: -34px !important; }"
+        # Spread the in-call controls apart so a mobile thumb reaching for the
+        # audio-mute doesn't land on Stop. .button-wrap is the flex pill holding
+        # [Stop] [audio-mute] [mic-mute] (FastRTC 0.0.34); widen the gaps and
+        # enlarge the mute tap-targets. gap/padding are tunable if it still feels
+        # cramped (or too spread) on your phone.
+        ".button-wrap.full-screen { gap: var(--size-7) !important;"
+        " flex-wrap: wrap !important; justify-content: center !important; }"
+        ".button-wrap .mute-button {"
+        " padding: var(--size-2) var(--size-4) !important; }"
         "</style>"
     )
     direction = gr.Radio(
@@ -317,6 +326,29 @@ with demo:
         info="Raise for AirPods / quiet mics: detects quieter speech and boosts input gain.",
     )
     sensitivity.change(_apply_sensitivity, inputs=sensitivity, outputs=None)
+
+    # Default the audio OUTPUT to muted. The mute-audio button only exists once
+    # the stream opens, so we can't click it at page load — instead watch the
+    # DOM and click it the first time it appears unmuted (aria-label "mute
+    # audio"). One-shot: after the auto-mute we disconnect, so if the user later
+    # unmutes it stays unmuted. (FastRTC exposes no default-muted flag.)
+    demo.load(
+        fn=None,
+        js="""
+() => {
+  let done = false;
+  const mute = () => {
+    if (done) return;
+    const b = document.querySelector('button.mute-button[aria-label="mute audio"]');
+    if (b) { b.click(); done = true; obs.disconnect(); }
+  };
+  const obs = new MutationObserver(mute);
+  obs.observe(document.body, {subtree: true, childList: true,
+    attributes: true, attributeFilter: ['aria-label']});
+  mute();
+}
+""",
+    )
 
 if __name__ == "__main__":
     demo.launch()
