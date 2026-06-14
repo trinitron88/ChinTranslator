@@ -17,7 +17,11 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # Default is the stock large-v3 (works before fine-tuning). After training +
 # export_model.py, set CHIN_MODEL to the local CT2 dir, e.g.:
 #   CHIN_MODEL=whisper-cnh-turbo-ct2 python gradio_interface.py
-MODEL_NAME = os.environ.get("CHIN_MODEL", "large-v3")
+# Stock fallback matches the base the adapter was trained on (large-v3-turbo),
+# but it's still NOT fine-tuned — it knows no Hakha Chin. Always set CHIN_MODEL
+# to your CT2 model in real use; the banner below shouts when you haven't.
+STOCK_FALLBACK = "large-v3-turbo"
+MODEL_NAME = os.environ.get("CHIN_MODEL", STOCK_FALLBACK)
 
 
 def resolve_model(name):
@@ -58,8 +62,9 @@ print("=" * 64)
 print(f"  Hakha Chin STT  |  MODEL: {MODEL_NAME}  |  DEVICE: {DEVICE}")
 if MODEL_PATH != MODEL_NAME:
     print(f"  resolved → {MODEL_PATH}")
-if MODEL_NAME == "large-v3":
-    print("  ⚠️  stock large-v3 (NOT fine-tuned). Set CHIN_MODEL=whisper-cnh-turbo-ct2")
+if MODEL_NAME == STOCK_FALLBACK:
+    print(f"  ⚠️  stock {STOCK_FALLBACK} (NOT fine-tuned, knows no Hakha Chin). "
+          f"Set CHIN_MODEL=whisper-cnh-turbo-ct2")
 print("=" * 64)
 
 # Load once at startup: surfaces a bad model immediately (not on first request)

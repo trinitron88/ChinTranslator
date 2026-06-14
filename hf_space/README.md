@@ -20,10 +20,24 @@ Whisper model, translates to English, and speaks the English back over WebRTC.
 
 - **Variable `CHIN_MODEL`** — your CT2 model repo id, e.g.
   `your-username/whisper-cnh-turbo-ct2`. `faster-whisper` downloads it on boot.
+  **Required:** the Space refuses to start without it rather than silently
+  serving stock Whisper (which knows no Hakha Chin and emits garbage). Set
+  `ALLOW_STOCK=1` only to intentionally demo the base model.
 - **Secret `HF_TOKEN`** — used to fetch Cloudflare TURN credentials (and to pull
   the model if its repo is private).
 - **Hardware** — needs a **GPU** tier for real-time; CPU is too slow for
   `large-v3-turbo`.
+
+## Publishing the model (one-time)
+
+The Space runs on HF infra and **cannot read a Drive path** — `CHIN_MODEL` must
+be an HF *model-repo id*. After `export_model.py` produces the CT2 folder, push
+it to a model repo and point the Space at it:
+
+```bash
+python hf_space/upload_model.py --repo your-username/whisper-cnh-turbo-ct2
+# then set the Space Variable CHIN_MODEL to that repo id and restart
+```
 
 ## Notes
 
