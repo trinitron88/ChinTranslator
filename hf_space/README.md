@@ -27,6 +27,10 @@ Whisper model, translates to English, and speaks the English back over WebRTC.
   the model if its repo is private).
 - **Hardware** — needs a **GPU** tier for real-time; CPU is too slow for
   `large-v3-turbo`.
+- **Variable `DENOISE`** *(optional)* — ambient-noise suppression before ASR:
+  `noisereduce` (default, light spectral gating), `df` (DeepFilterNet — neural,
+  cleaner; also add `deepfilternet` to `requirements.txt`), or `off`.
+  `DENOISE_AMOUNT` (0–1, default 0.85) eases the noisereduce reduction.
 
 ## Publishing the model (one-time)
 

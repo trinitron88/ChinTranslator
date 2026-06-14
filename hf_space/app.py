@@ -145,12 +145,67 @@ _DEFAULT_SENSITIVITY = 60
 _apply_sensitivity(_DEFAULT_SENSITIVITY)
 
 
+# --- Ambient-noise suppression ----------------------------------------------
+# Clean steady background (fans, traffic, hum) before transcription. Real rooms
+# are out-of-distribution vs the clean Common Voice the model trained on, so
+# quieter input usually helps WER. Backend via env DENOISE:
+#   noisereduce (default) — spectral gating, light, pure-Python, no model load
+#   df                     — DeepFilterNet (neural, cleaner, fewer artifacts);
+#                            requires adding `deepfilternet` to requirements.txt
+#   off                    — passthrough
+# DENOISE_AMOUNT (0–1, default 0.85) eases noisereduce's reduction to limit the
+# musical-noise artifacts that could themselves confuse a clean-trained model.
+# Any failure logs once and passes audio through — denoise never breaks a turn.
+DENOISE = os.environ.get("DENOISE", "noisereduce").lower()
+DENOISE_AMOUNT = float(os.environ.get("DENOISE_AMOUNT", "0.85"))
+_dn = {"model": None, "state": None, "sr": 48000, "ready": False, "warned": False}
+
+
+def denoise(samples, sr):
+    """samples: float32 mono in [-1, 1] at `sr`. Returns (clean_samples, sr_out).
+
+    DeepFilterNet runs at 48 kHz so it may change the rate; the caller resamples
+    to 16 kHz afterward regardless.
+    """
+    if DENOISE in ("off", "0", "none", "") or samples.size == 0:
+        return samples, sr
+    try:
+        if DENOISE == "df":
+            if not _dn["ready"]:
+                from df.enhance import init_df
+                _dn["model"], _dn["state"], _ = init_df()
+                _dn["sr"] = _dn["state"].sr()
+                _dn["ready"] = True
+            import torch as _torch
+            from df.enhance import enhance
+            tgt = _dn["sr"]
+            audio = (samples if sr == tgt
+                     else librosa.resample(samples, orig_sr=sr, target_sr=tgt))
+            clean = enhance(_dn["model"], _dn["state"],
+                            _torch.from_numpy(audio).unsqueeze(0))
+            return clean.squeeze(0).cpu().numpy().astype(np.float32), tgt
+        # default: noisereduce spectral gating (non-stationary adapts to changing noise)
+        import noisereduce as nr
+        clean = nr.reduce_noise(y=samples, sr=sr, prop_decrease=DENOISE_AMOUNT,
+                                stationary=False)
+        return clean.astype(np.float32), sr
+    except Exception as e:  # noqa: BLE001
+        if not _dn["warned"]:
+            print(f"[denoise] backend {DENOISE!r} unavailable ({e}); "
+                  f"passing audio through.", flush=True)
+            _dn["warned"] = True
+        return samples, sr
+
+
 def on_utterance(audio):
     sr, samples = audio
     samples = np.asarray(samples).astype(np.float32).flatten()
     peak = np.max(np.abs(samples)) if samples.size else 0.0
     if peak > 1.0:
         samples = samples / 32768.0
+    # Suppress ambient noise on the native-rate signal, before gain/downsample
+    # (boosting cleaned speech beats boosting the noise along with it).
+    samples, sr = denoise(samples, sr)
     gain = SETTINGS["gain"]
     if gain != 1.0:
         samples = np.clip(samples * gain, -1.0, 1.0)
