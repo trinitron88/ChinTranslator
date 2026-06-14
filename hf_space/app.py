@@ -145,6 +145,66 @@ _DEFAULT_SENSITIVITY = 60
 _apply_sensitivity(_DEFAULT_SENSITIVITY)
 
 
+# --- Ambient-noise suppression ----------------------------------------------
+# Clean steady background (fans, traffic, hum) before transcription. Real rooms
+# are out-of-distribution vs the clean Common Voice the model trained on, so
+# quieter input usually helps WER. Backend via env DENOISE:
+#   noisereduce (default) — spectral gating, light, pure-Python, no model load
+#   df                     — DeepFilterNet (neural, cleaner, fewer artifacts);
+#                            requires adding `deepfilternet` to requirements.txt
+#   off                    — passthrough
+# DENOISE_AMOUNT (0–1, default 0.85) eases noisereduce's reduction to limit the
+# musical-noise artifacts that could themselves confuse a clean-trained model.
+# Any failure logs once and passes audio through — denoise never breaks a turn.
+DENOISE = os.environ.get("DENOISE", "noisereduce").lower()
+DENOISE_AMOUNT = float(os.environ.get("DENOISE_AMOUNT", "0.85"))
+# Stationary mode estimates one noise profile for the whole clip — far faster
+# than non-stationary and a good fit for steady ambient noise (fans/hum/traffic).
+# Set DENOISE_STATIONARY=0 for fluctuating noise (slower).
+DENOISE_STATIONARY = os.environ.get("DENOISE_STATIONARY", "1") != "0"
+_dn = {"model": None, "state": None, "sr": 48000, "ready": False, "warned": False}
+
+
+def denoise(samples, sr):
+    """Suppress ambient noise. samples: float32 mono in [-1, 1] at `sr`; returns
+    cleaned samples at the SAME sr.
+
+    Called on the 16 kHz signal the model sees: doing it at the 48 kHz native
+    rate in non-stationary mode was slow enough to back the queue up indefinitely
+    (the transcript rides additional_outputs on that queue, so it stalled). Any
+    failure logs once and passes audio through — denoise never breaks a turn.
+    """
+    if DENOISE in ("off", "0", "none", "") or samples.size == 0:
+        return samples
+    try:
+        if DENOISE == "df":
+            if not _dn["ready"]:
+                from df.enhance import init_df
+                _dn["model"], _dn["state"], _ = init_df()
+                _dn["sr"] = _dn["state"].sr()
+                _dn["ready"] = True
+            import torch as _torch
+            from df.enhance import enhance
+            tgt = _dn["sr"]  # DeepFilterNet runs at 48 kHz; up/downsample around it
+            audio = (samples if sr == tgt
+                     else librosa.resample(samples, orig_sr=sr, target_sr=tgt))
+            clean = enhance(_dn["model"], _dn["state"],
+                            _torch.from_numpy(audio).unsqueeze(0))
+            clean = clean.squeeze(0).cpu().numpy().astype(np.float32)
+            return (clean if sr == tgt
+                    else librosa.resample(clean, orig_sr=tgt, target_sr=sr))
+        import noisereduce as nr
+        clean = nr.reduce_noise(y=samples, sr=sr, prop_decrease=DENOISE_AMOUNT,
+                                stationary=DENOISE_STATIONARY)
+        return clean.astype(np.float32)
+    except Exception as e:  # noqa: BLE001
+        if not _dn["warned"]:
+            print(f"[denoise] backend {DENOISE!r} unavailable ({e}); "
+                  f"passing audio through.", flush=True)
+            _dn["warned"] = True
+        return samples
+
+
 def on_utterance(audio):
     sr, samples = audio
     samples = np.asarray(samples).astype(np.float32).flatten()
@@ -156,6 +216,10 @@ def on_utterance(audio):
         samples = np.clip(samples * gain, -1.0, 1.0)
     if sr != 16000:
         samples = librosa.resample(samples, orig_sr=sr, target_sr=16000)
+        sr = 16000
+    # Suppress ambient noise on the 16 kHz signal the model sees — cheap here;
+    # at the 48 kHz native rate it was slow enough to back up the queue.
+    samples = denoise(samples, sr)
     cfg = DIRECTIONS[SETTINGS["direction"]]
     asr_kwargs = {"task": "transcribe", "beam_size": 5, "vad_filter": False}
     if cfg["asr_lang"]:
@@ -268,7 +332,7 @@ stream = Stream(
     server_rtc_configuration=server_rtc_configuration,
     # Short, one-line title so it doesn't wrap and overlap the record button
     # on mobile.
-    ui_args={"title": "Chin Translator"},
+    ui_args={"title": "Hahka Chin Audio Translator"},
 )
 
 # Spaces (gradio SDK) serves this `demo` object. Append a mic-sensitivity slider;
@@ -309,7 +373,8 @@ with demo:
         ".button-wrap.full-screen { gap: var(--size-7) !important;"
         " flex-wrap: wrap !important; justify-content: center !important; }"
         ".button-wrap .mute-button {"
-        " padding: var(--size-2) var(--size-4) !important; }"
+        " padding: var(--size-2) var(--size-4) !important;"
+        " border-radius: var(--radius-lg) !important; }"
         "</style>"
     )
     direction = gr.Radio(

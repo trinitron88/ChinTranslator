@@ -6,3 +6,5 @@ soundfile
 numpy
 torch
 huggingface_hub
+noisereduce
+# For DENOISE=df (DeepFilterNet, higher quality), also add: deepfilternet
