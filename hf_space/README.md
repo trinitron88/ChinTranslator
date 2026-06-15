@@ -33,6 +33,13 @@ Whisper model, translates to English, and speaks the English back over WebRTC.
   `requirements.txt`), or `off`. `DENOISE_AMOUNT` (0–1, default 0.85) eases the
   reduction; `DENOISE_STATIONARY=0` switches to the slower non-stationary mode
   for fluctuating (non-steady) noise.
+- **Variable `TTS_BACKEND`** *(optional)* — `piper` (default) speaks English
+  locally with Piper (low latency, no per-phrase network round-trip); `gtts`
+  forces the old Google path. Piper covers English only (cnh→en); Chin stays
+  text-only. The voice comes from `PIPER_MODEL` (a local `.onnx` path, with
+  `PIPER_CONFIG` or a sibling `.onnx.json`) or `PIPER_VOICE` (default
+  `en_US-lessac-medium`, downloaded from `rhasspy/piper-voices`). On **any**
+  Piper failure the app falls back to gTTS, so it always speaks.
 
 ## Publishing the model (one-time)
 
@@ -48,5 +55,5 @@ python hf_space/upload_model.py --repo your-username/whisper-cnh-turbo-ct2
 ## Notes
 
 - Latency of ~2–5s behind the speaker is normal for live interpretation.
-- TTS is gTTS (placeholder); swap to Piper for lower latency.
+- TTS defaults to local **Piper** (low latency), with gTTS as automatic fallback.
 - Companion to the batch translator and `realtime.py` in the source repo.
