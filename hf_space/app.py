@@ -63,7 +63,11 @@ print("✓ Model loaded.")
 
 CHIN_CODE = "cnh"
 
-APP_VERSION = os.environ.get("APP_VERSION", "v5.1.0-cache")
+# Version is defined HERE, in source — the deployed code IS the version. No env
+# override on purpose: a Space variable can't silently pin the build stamp, so
+# the "Build:" you see always equals the code that's running. Bump this when you
+# ship a change.
+APP_VERSION = "v5.1.0-cache"
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
