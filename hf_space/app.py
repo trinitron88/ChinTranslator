@@ -61,7 +61,7 @@ print("✓ Model loaded.")
 
 CHIN_CODE = "cnh"
 
-APP_VERSION = os.environ.get("APP_VERSION", "v5.0.1")
+APP_VERSION = os.environ.get("APP_VERSION", "v5.2.0-piper")
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
