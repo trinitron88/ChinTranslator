@@ -27,6 +27,11 @@ Whisper model, translates to English, and speaks the English back over WebRTC.
   the model if its repo is private).
 - **Hardware** — needs a **GPU** tier for real-time; CPU is too slow for
   `large-v3-turbo`.
+- **Variable `EN_ASR_MODEL`** *(optional)* — for the **English→Chin** direction,
+  English is transcribed with a stock English Whisper (the cnh-fine-tuned model
+  garbles English, e.g. "street"→"strih"), then translated en→cnh. Default
+  `small.en`; any faster-whisper size works. Loaded lazily, only if en→cnh is
+  used; falls back to the fine-tuned model if it can't load.
 - **Variable `DENOISE`** *(optional)* — ambient-noise suppression on the 16 kHz
   signal before ASR: `noisereduce` (default, light spectral gating), `df`
   (DeepFilterNet — neural, cleaner; also add `deepfilternet` to
@@ -40,6 +45,10 @@ Whisper model, translates to English, and speaks the English back over WebRTC.
   `PIPER_CONFIG` or a sibling `.onnx.json`) or `PIPER_VOICE` (default
   `en_US-lessac-medium`, downloaded from `rhasspy/piper-voices`). On **any**
   Piper failure the app falls back to gTTS, so it always speaks.
+- **Caching** *(automatic)* — repeated phrases reuse cached translations and TTS
+  audio (keyed on whitespace-normalized text), cutting latency and Google calls.
+  `CACHE_LOG=1` logs cache hits/misses; `TTS_CACHE_MAX` (default 256) bounds the
+  audio cache. Nothing is persisted to disk.
 
 ## Publishing the model (one-time)
 

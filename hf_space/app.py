@@ -14,8 +14,10 @@ Dependencies are installed from requirements.txt at build time.
 
 import os
 import json
+import re
 import tempfile
-from collections import deque
+import functools
+from collections import OrderedDict, deque
 
 import numpy as np
 import librosa
@@ -59,9 +61,41 @@ MODEL = WhisperModel(MODEL_NAME, device=DEVICE,
                      compute_type="float16" if DEVICE == "cuda" else "int8")
 print("✓ Model loaded.")
 
+# English ASR for the English→Chin direction. The cnh-fine-tuned model above
+# mangles English ("street" → "strih") because it specialized on Hakha Chin, so
+# transcribe English with a stock English Whisper instead, then translate en→cnh.
+# Loaded lazily on first en→cnh use, so it costs nothing if that direction is
+# never used. EN_ASR_MODEL = any faster-whisper size (default small.en: light +
+# accurate English).
+EN_ASR_MODEL = os.environ.get("EN_ASR_MODEL", "small.en")
+_en_asr = {"model": None, "tried": False}
+
+
+def english_asr_model():
+    """Stock English Whisper for the en→cnh ASR step (cached). Falls back to the
+    fine-tuned model if it can't load."""
+    if _en_asr["tried"]:
+        return _en_asr["model"]
+    _en_asr["tried"] = True
+    try:
+        _en_asr["model"] = WhisperModel(
+            EN_ASR_MODEL, device=DEVICE,
+            compute_type="float16" if DEVICE == "cuda" else "int8")
+        print(f"✓ English ASR model loaded: {EN_ASR_MODEL}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[asr] English model '{EN_ASR_MODEL}' unavailable ({e}); "
+              f"using the fine-tuned model for English.", flush=True)
+        _en_asr["model"] = None
+    return _en_asr["model"]
+
+
 CHIN_CODE = "cnh"
 
-APP_VERSION = os.environ.get("APP_VERSION", "v5.2.0-piper")
+# Version is defined HERE, in source — the deployed code IS the version. No env
+# override on purpose: a Space variable can't silently pin the build stamp, so
+# the "Build:" you see always equals the code that's running. Bump this when you
+# ship a change.
+APP_VERSION = "v5.3.0-piper"
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
@@ -72,38 +106,71 @@ SKIP_ENGLISH = os.environ.get("SKIP_ENGLISH", "1") != "0"
 EN_SKIP_PROB = float(os.environ.get("EN_SKIP_PROB", "0.5"))
 
 
+# --- Caching -----------------------------------------------------------------
+# People repeat phrases ("yes", "okay", "how are you"), and each repeat otherwise
+# re-hits Google Translate AND regenerates TTS audio. Cache both on a normalized
+# text key to cut latency, network calls, and battery. Single-user Space, so
+# in-process LRUs are fine and nothing is persisted (no disk needed).
+# CACHE_LOG=1 logs hits/misses; TTS_CACHE_MAX bounds the audio cache.
+CACHE_LOG = os.environ.get("CACHE_LOG", "0") == "1"
+
+
+def _norm(text: str) -> str:
+    """Trim + collapse internal whitespace, for stable cache keys."""
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+@functools.lru_cache(maxsize=512)
+def _translate_cached(norm_text: str, sl: str, tl: str) -> str:
+    """The Google call, on normalized text. Raises on failure so failures are
+    NOT cached — the wrapper catches and falls back without poisoning the cache."""
+    import urllib.parse
+    import urllib.request
+    url = ("https://translate.googleapis.com/translate_a/single"
+           f"?client=gtx&sl={sl}&tl={tl}&dt=t&q=" + urllib.parse.quote(norm_text))
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return "".join(seg[0] for seg in data[0] if seg and seg[0]).strip()
+
+
 def translate(text: str, sl: str, tl: str) -> str:
     text = (text or "").strip()
     if not text:
         return ""
-    import urllib.parse
-    import urllib.request
-    url = ("https://translate.googleapis.com/translate_a/single"
-           f"?client=gtx&sl={sl}&tl={tl}&dt=t&q=" + urllib.parse.quote(text))
+    norm = _norm(text)
+    before = _translate_cached.cache_info().hits
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        return "".join(seg[0] for seg in data[0] if seg and seg[0]).strip() or text
-    except Exception as e:
+        out = _translate_cached(norm, sl, tl)
+    except Exception as e:  # noqa: BLE001
         print(f"[translate] failed ({e})")
         return text
+    if CACHE_LOG:
+        hit = _translate_cached.cache_info().hits > before
+        print(f"[cache] translate {'HIT' if hit else 'miss'}: {norm[:40]!r}", flush=True)
+    return out or text
 
 
 # --- Text-to-speech ----------------------------------------------------------
 # TTS_BACKEND=piper (default) synthesizes English locally with Piper — no
 # per-phrase network round-trip or MP3 temp file, much lower latency than gTTS,
-# and CPU-light (good on the Space's tight budget). gTTS is the automatic
-# fallback on ANY Piper failure (dep not installed, model missing, synth error),
-# so the app always boots and speaks even if Piper is unavailable. Set
-# TTS_BACKEND=gtts to force the old path. Piper only covers English (cnh→en);
-# Chin (en→cnh) has no voice in either backend and stays text-only.
+# and CPU-light. gTTS is the automatic fallback on ANY Piper failure (dep not
+# installed, model missing, synth error), so the app always boots and speaks.
+# Set TTS_BACKEND=gtts to force the old path. Piper only covers English (cnh→en);
+# Chin has no voice in either backend and stays text-only. speak() caches the
+# result of whichever backend runs.
 #
 # Piper voice: PIPER_MODEL = a local .onnx path (with PIPER_CONFIG or a sibling
 # .onnx.json), else PIPER_VOICE names a voice downloaded from rhasspy/piper-voices.
 TTS_BACKEND = os.environ.get("TTS_BACKEND", "piper").lower()
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-lessac-medium")
 _piper = {"voice": None, "tried": False, "warned": False}
+
+# TTS cache: (normalized_text, lang) → (sample_rate, int16 PCM). Only successful
+# audio is cached (never None, so failures / Chin-text-only keep retrying). Store
+# and return COPIES so a consumer can never mutate the cached array.
+_TTS_CACHE_MAX = int(os.environ.get("TTS_CACHE_MAX", "256"))
+_tts_cache = OrderedDict()
 
 
 def _load_piper():
@@ -162,7 +229,7 @@ def _speak_piper(text: str):
 
 
 def _speak_gtts(text: str, lang: str):
-    """TTS via gTTS. Returns None if the language is unsupported (e.g. Chin)."""
+    """TTS via gTTS. Returns (sr, int16 PCM) or None (unsupported lang, e.g. Chin)."""
     try:
         from gtts import gTTS
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
@@ -178,18 +245,41 @@ def _speak_gtts(text: str, lang: str):
         return None
 
 
-def speak(text: str, lang: str):
-    """Synthesize speech → (sample_rate, int16 PCM (1, N)) or None (text-only).
-    Piper for English when TTS_BACKEND=piper; gTTS otherwise or on any Piper
-    failure. Chin has no voice in either backend, so it returns None."""
-    text = (text or "").strip()
-    if not text:
-        return None
+def _synthesize(text: str, lang: str):
+    """Dispatch to a backend: Piper for English when TTS_BACKEND=piper (with gTTS
+    fallback on failure), else gTTS. Returns (sr, int16 PCM) or None."""
     if TTS_BACKEND == "piper" and lang == "en":
         out = _speak_piper(text)
         if out is not None:
             return out  # else fall through to gTTS
     return _speak_gtts(text, lang)
+
+
+def speak(text: str, lang: str):
+    """Cached TTS. Returns (sr, int16 PCM) or None (text-only). Synthesizes via
+    _synthesize (Piper/gTTS), caches only successful audio, and hands back a copy
+    so the cached array is never mutated."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    key = (_norm(text), lang)
+    hit = _tts_cache.get(key)
+    if hit is not None:
+        _tts_cache.move_to_end(key)
+        if CACHE_LOG:
+            print(f"[cache] tts HIT: {key[0][:40]!r}", flush=True)
+        sr, pcm = hit
+        return sr, pcm.copy()
+    out = _synthesize(text, lang)
+    if out is not None:
+        sr, pcm = out
+        _tts_cache[key] = (sr, pcm.copy())          # private copy in the cache
+        _tts_cache.move_to_end(key)
+        while len(_tts_cache) > _TTS_CACHE_MAX:
+            _tts_cache.popitem(last=False)
+        if CACHE_LOG:
+            print(f"[cache] tts miss→store: {key[0][:40]!r}", flush=True)
+    return out
 
 
 # --- Mic sensitivity ---------------------------------------------------------
@@ -305,10 +395,17 @@ def on_utterance(audio):
     # at the 48 kHz native rate it was slow enough to back up the queue.
     samples = denoise(samples, sr)
     cfg = DIRECTIONS[SETTINGS["direction"]]
+    # English→Chin: transcribe English with the stock English model (the
+    # fine-tuned cnh model garbles English); translation to cnh happens below.
+    # Chin→English keeps the fine-tuned model.
+    if SETTINGS["direction"] == "en2cnh":
+        asr = english_asr_model() or MODEL
+    else:
+        asr = MODEL
     asr_kwargs = {"task": "transcribe", "beam_size": 5, "vad_filter": False}
     if cfg["asr_lang"]:
         asr_kwargs["language"] = cfg["asr_lang"]
-    segs, info = MODEL.transcribe(samples, **asr_kwargs)
+    segs, info = asr.transcribe(samples, **asr_kwargs)
     src_text = "".join(s.text for s in segs).strip()
     if not src_text:
         return
