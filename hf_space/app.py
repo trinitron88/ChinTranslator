@@ -14,8 +14,10 @@ Dependencies are installed from requirements.txt at build time.
 
 import os
 import json
+import re
 import tempfile
-from collections import deque
+import functools
+from collections import OrderedDict, deque
 
 import numpy as np
 import librosa
@@ -61,7 +63,11 @@ print("✓ Model loaded.")
 
 CHIN_CODE = "cnh"
 
-APP_VERSION = os.environ.get("APP_VERSION", "v5.0.1")
+# Version is defined HERE, in source — the deployed code IS the version. No env
+# override on purpose: a Space variable can't silently pin the build stamp, so
+# the "Build:" you see always equals the code that's running. Bump this when you
+# ship a change.
+APP_VERSION = "v5.1.0-cache"
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
@@ -72,30 +78,60 @@ SKIP_ENGLISH = os.environ.get("SKIP_ENGLISH", "1") != "0"
 EN_SKIP_PROB = float(os.environ.get("EN_SKIP_PROB", "0.5"))
 
 
+# --- Caching -----------------------------------------------------------------
+# People repeat phrases ("yes", "okay", "how are you"), and each repeat otherwise
+# re-hits Google Translate AND regenerates TTS audio. Cache both on a normalized
+# text key to cut latency, network calls, and battery. Single-user Space, so
+# in-process LRUs are fine and nothing is persisted (no disk needed).
+# CACHE_LOG=1 logs hits/misses; TTS_CACHE_MAX bounds the audio cache.
+CACHE_LOG = os.environ.get("CACHE_LOG", "0") == "1"
+
+
+def _norm(text: str) -> str:
+    """Trim + collapse internal whitespace, for stable cache keys."""
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+@functools.lru_cache(maxsize=512)
+def _translate_cached(norm_text: str, sl: str, tl: str) -> str:
+    """The Google call, on normalized text. Raises on failure so failures are
+    NOT cached — the wrapper catches and falls back without poisoning the cache."""
+    import urllib.parse
+    import urllib.request
+    url = ("https://translate.googleapis.com/translate_a/single"
+           f"?client=gtx&sl={sl}&tl={tl}&dt=t&q=" + urllib.parse.quote(norm_text))
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return "".join(seg[0] for seg in data[0] if seg and seg[0]).strip()
+
+
 def translate(text: str, sl: str, tl: str) -> str:
     text = (text or "").strip()
     if not text:
         return ""
-    import urllib.parse
-    import urllib.request
-    url = ("https://translate.googleapis.com/translate_a/single"
-           f"?client=gtx&sl={sl}&tl={tl}&dt=t&q=" + urllib.parse.quote(text))
+    norm = _norm(text)
+    before = _translate_cached.cache_info().hits
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        return "".join(seg[0] for seg in data[0] if seg and seg[0]).strip() or text
-    except Exception as e:
+        out = _translate_cached(norm, sl, tl)
+    except Exception as e:  # noqa: BLE001
         print(f"[translate] failed ({e})")
         return text
+    if CACHE_LOG:
+        hit = _translate_cached.cache_info().hits > before
+        print(f"[cache] translate {'HIT' if hit else 'miss'}: {norm[:40]!r}", flush=True)
+    return out or text
 
 
-def speak(text: str, lang: str):
-    """TTS via gTTS. Returns None if the language is unsupported (e.g. Chin),
-    in which case the caller just shows text without audio."""
-    text = (text or "").strip()
-    if not text:
-        return None
+# TTS cache: (normalized_text, lang) → (sample_rate, int16 PCM). Only successful
+# audio is cached (never None, so failures / Chin-text-only keep retrying). Store
+# and return COPIES so a consumer can never mutate the cached array.
+_TTS_CACHE_MAX = int(os.environ.get("TTS_CACHE_MAX", "256"))
+_tts_cache = OrderedDict()
+
+
+def _synthesize(text: str, lang: str):
+    """TTS via gTTS. Returns (sr, int16 PCM (1,N)) or None (unsupported lang / fail)."""
     try:
         from gtts import gTTS
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
@@ -109,6 +145,32 @@ def speak(text: str, lang: str):
     except Exception as e:
         print(f"[tts] failed for lang={lang!r} ({e}) — showing text only")
         return None
+
+
+def speak(text: str, lang: str):
+    """Cached TTS. Returns (sr, int16 PCM) or None (text-only). Caches only
+    successful audio and hands back a copy so the cached array is never mutated."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    key = (_norm(text), lang)
+    hit = _tts_cache.get(key)
+    if hit is not None:
+        _tts_cache.move_to_end(key)
+        if CACHE_LOG:
+            print(f"[cache] tts HIT: {key[0][:40]!r}", flush=True)
+        sr, pcm = hit
+        return sr, pcm.copy()
+    out = _synthesize(text, lang)
+    if out is not None:
+        sr, pcm = out
+        _tts_cache[key] = (sr, pcm.copy())          # private copy in the cache
+        _tts_cache.move_to_end(key)
+        while len(_tts_cache) > _TTS_CACHE_MAX:
+            _tts_cache.popitem(last=False)
+        if CACHE_LOG:
+            print(f"[cache] tts miss→store: {key[0][:40]!r}", flush=True)
+    return out
 
 
 # --- Mic sensitivity ---------------------------------------------------------

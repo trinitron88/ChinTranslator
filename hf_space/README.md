@@ -33,6 +33,10 @@ Whisper model, translates to English, and speaks the English back over WebRTC.
   `requirements.txt`), or `off`. `DENOISE_AMOUNT` (0–1, default 0.85) eases the
   reduction; `DENOISE_STATIONARY=0` switches to the slower non-stationary mode
   for fluctuating (non-steady) noise.
+- **Caching** *(automatic)* — repeated phrases reuse cached translations and TTS
+  audio (keyed on whitespace-normalized text), cutting latency and Google calls.
+  `CACHE_LOG=1` logs cache hits/misses; `TTS_CACHE_MAX` (default 256) bounds the
+  audio cache. Nothing is persisted to disk.
 
 ## Publishing the model (one-time)
 
