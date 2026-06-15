@@ -61,13 +61,41 @@ MODEL = WhisperModel(MODEL_NAME, device=DEVICE,
                      compute_type="float16" if DEVICE == "cuda" else "int8")
 print("✓ Model loaded.")
 
+# English ASR for the English→Chin direction. The cnh-fine-tuned model above
+# mangles English ("street" → "strih") because it specialized on Hakha Chin, so
+# transcribe English with a stock English Whisper instead, then translate en→cnh.
+# Loaded lazily on first en→cnh use, so it costs nothing if that direction is
+# never used. EN_ASR_MODEL = any faster-whisper size (default small.en: light +
+# accurate English).
+EN_ASR_MODEL = os.environ.get("EN_ASR_MODEL", "small.en")
+_en_asr = {"model": None, "tried": False}
+
+
+def english_asr_model():
+    """Stock English Whisper for the en→cnh ASR step (cached). Falls back to the
+    fine-tuned model if it can't load."""
+    if _en_asr["tried"]:
+        return _en_asr["model"]
+    _en_asr["tried"] = True
+    try:
+        _en_asr["model"] = WhisperModel(
+            EN_ASR_MODEL, device=DEVICE,
+            compute_type="float16" if DEVICE == "cuda" else "int8")
+        print(f"✓ English ASR model loaded: {EN_ASR_MODEL}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[asr] English model '{EN_ASR_MODEL}' unavailable ({e}); "
+              f"using the fine-tuned model for English.", flush=True)
+        _en_asr["model"] = None
+    return _en_asr["model"]
+
+
 CHIN_CODE = "cnh"
 
 # Version is defined HERE, in source — the deployed code IS the version. No env
 # override on purpose: a Space variable can't silently pin the build stamp, so
 # the "Build:" you see always equals the code that's running. Bump this when you
 # ship a change.
-APP_VERSION = "v5.1.0-cache"
+APP_VERSION = "v5.2.0-enasr"
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
@@ -286,10 +314,17 @@ def on_utterance(audio):
     # at the 48 kHz native rate it was slow enough to back up the queue.
     samples = denoise(samples, sr)
     cfg = DIRECTIONS[SETTINGS["direction"]]
+    # English→Chin: transcribe English with the stock English model (the
+    # fine-tuned cnh model garbles English); translation to cnh happens below.
+    # Chin→English keeps the fine-tuned model.
+    if SETTINGS["direction"] == "en2cnh":
+        asr = english_asr_model() or MODEL
+    else:
+        asr = MODEL
     asr_kwargs = {"task": "transcribe", "beam_size": 5, "vad_filter": False}
     if cfg["asr_lang"]:
         asr_kwargs["language"] = cfg["asr_lang"]
-    segs, info = MODEL.transcribe(samples, **asr_kwargs)
+    segs, info = asr.transcribe(samples, **asr_kwargs)
     src_text = "".join(s.text for s in segs).strip()
     if not src_text:
         return
