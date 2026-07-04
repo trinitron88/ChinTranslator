@@ -76,6 +76,30 @@ limit_eval = "--limit 20" if SMOKE else ""
 !python evaluate_model.py --model "{CT2_OUT}" {limit_eval} \
   --report "{RUN_DIR}/eval_report.json"
 
+# --- 7. Publish: model → HF model repo, app → realtime Space -----------
+import os
+MODEL_REPO = f"{os.environ.get('HF_USER', 'bsantisi')}/whisper-cnh-turbo-ct2"
+SPACE_REPO = f"{os.environ.get('HF_USER', 'bsantisi')}/chin-realtime"
+
+# 1) model weights (+ chin_metadata.json, so the Space forces the right
+#    language token automatically)
+!python hf_space/upload_model.py --model-dir "{CT2_OUT}" --repo "{MODEL_REPO}"
+
+# 2) the realtime app code (uses this run's branch)
+os.environ["CT_REPO_DIR"] = "/content/ChinTranslator"
+os.environ["CT_BRANCH"] = BRANCH
+%run hf_space/deploy_colab.py
+
+# 3) restart — required when only the MODEL repo changed (no code commit →
+#    no auto-rebuild → the Space would keep serving the old weights)
+import sys
+sys.path.insert(0, "hf_space")
+from upload_model import _resolve_hf_token
+from huggingface_hub import HfApi
+HfApi(token=_resolve_hf_token()).restart_space(SPACE_REPO)
+print(f"\n✅ live: https://huggingface.co/spaces/{SPACE_REPO}")
+print(f"   (Space variable CHIN_MODEL must be: {MODEL_REPO})")
+
 # --- 7. Launch Gradio on the freshly trained model --------------------
 import os
 os.environ["CHIN_MODEL"] = CT2_OUT

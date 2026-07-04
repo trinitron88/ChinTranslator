@@ -24,8 +24,20 @@ restart the Space.
 import argparse
 import os
 
-# Defaults match export_model.py's Drive conventions (model_v5/ per session memory).
-DEFAULT_MODEL_DIR = "/content/drive/MyDrive/ChinTranslator/model_v5/whisper-cnh-turbo-ct2"
+def _default_model_dir():
+    """Newest exported model: the notebook records every run's CT2 path in
+    LATEST_MODEL.txt, so a bare `python upload_model.py` ships the latest run.
+    Falls back to the legacy model_v5 path for pre-runs-layout Drives."""
+    latest = "/content/drive/MyDrive/ChinTranslator/LATEST_MODEL.txt"
+    if os.path.isfile(latest):
+        with open(latest, encoding="utf-8") as f:
+            path = f.read().strip()
+        if path:
+            return path
+    return "/content/drive/MyDrive/ChinTranslator/model_v5/whisper-cnh-turbo-ct2"
+
+
+DEFAULT_MODEL_DIR = _default_model_dir()
 # Repo owner defaults to HF_USER (then "bsantisi") so a fresh Colab only needs
 # the write token set, not the username re-entered each session. --repo overrides.
 HF_USER = os.environ.get("HF_USER", "bsantisi")
