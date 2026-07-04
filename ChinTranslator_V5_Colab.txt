@@ -63,9 +63,20 @@ print("📁 Artifacts will be saved under:", RUN_DIR)
 limit_arg = "--limit 80" if SMOKE else ""
 !python prepare_data.py --out data/cv_cnh {limit_arg}
 
+# Guard: refuse to continue into a "real" run on a smoke-sized dataset.
+# (Also halts Run-all if prepare_data.py crashed — !commands don't.)
+from datasets import load_from_disk
+_n = len(load_from_disk("data/cv_cnh")["train"])
+print(f"sanity: SMOKE={SMOKE}  train clips={_n}")
+assert SMOKE or _n > 1500, (
+    f"SMOKE=False but only {_n} train clips — the config cell probably ran "
+    "AFTER this one (edits don't apply to a running Run-all). "
+    "Runtime > Run all again.")
+
 ##### CODE CELL 7 #####
 # --- 5. Train LoRA → save adapter straight to Drive -------------------
 ep = 1 if SMOKE else EPOCHS
+print(f"sanity: SMOKE={SMOKE}  epochs={ep}")
 !python train.py --data data/cv_cnh --out "{LORA_OUT}" --epochs {ep}
 print("\n✓ Adapter saved to:", LORA_OUT)
 
