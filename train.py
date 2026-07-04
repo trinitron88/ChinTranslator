@@ -328,17 +328,39 @@ def main():
             test_ds = test_ds.select(range(min(max(1, limit // 4), len(test_ds))))
         model.eval()
         infer_device = next(model.parameters()).device
-        gen_dtype = torch.float16 if infer_device.type == "cuda" else torch.float32
         gen_kwargs = {"max_new_tokens": 225}
         if lang:
             gen_kwargs.update(language=lang, task=TASK)
+
+        # The right feature dtype depends on how the base was loaded: the
+        # 8-bit path (prepare_model_for_kbit_training) upcasts convs/norms to
+        # fp32 and rejects fp16 inputs; a plain fp16 CUDA load wants fp16.
+        # Probe on the first clip and stick with what works.
+        dtype_candidates = ([torch.float32, torch.float16]
+                            if infer_device.type == "cuda" else [torch.float32])
+        gen_dtype = None
+
+        def generate(feats):
+            nonlocal gen_dtype
+            if gen_dtype is not None:
+                return model.generate(input_features=feats.to(gen_dtype), **gen_kwargs)
+            last_err = None
+            for cand in dtype_candidates:
+                try:
+                    ids = model.generate(input_features=feats.to(cand), **gen_kwargs)
+                    gen_dtype = cand
+                    return ids
+                except RuntimeError as e:
+                    last_err = e
+            raise last_err
+
         preds, refs = [], []
         for ex in test_ds:
             feats = processor.feature_extractor(
                 np.asarray(ex["audio"], dtype=np.float32), sampling_rate=16000,
-                return_tensors="pt").input_features.to(infer_device).to(gen_dtype)
+                return_tensors="pt").input_features.to(infer_device)
             with torch.no_grad():
-                ids = model.generate(input_features=feats, **gen_kwargs)
+                ids = generate(feats)
             preds.append(processor.tokenizer.decode(ids[0], skip_special_tokens=True))
             refs.append(ex["sentence"])
         raw = 100 * wer_metric.compute(predictions=preds, references=refs)
