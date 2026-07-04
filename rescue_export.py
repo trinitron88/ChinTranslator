@@ -73,6 +73,18 @@ subprocess.run(
      "--quantization", "float16"],
     check=True,
 )
+# V6 runs keep serving metadata (surrogate language token) in the adapter
+# ROOT dir — train.py writes it before the first epoch, so it exists even for
+# mid-run checkpoints. Copy it so the apps force the training-time language
+# token. V5-era runs won't have it; the apps then use auto-detect as before.
+meta = os.path.join(ADAPTER.split("/checkpoint-")[0], "chin_metadata.json")
+if os.path.isfile(meta):
+    shutil.copy(meta, os.path.join(CT2_OUT, "chin_metadata.json"))
+    print(f"✓ copied chin_metadata.json from {meta}")
+else:
+    print("ℹ️  no chin_metadata.json found (V5-era run) — apps will auto-detect; "
+          "set CHIN_LANG to force a token if this is a V6 adapter.")
+
 with open(f"{DRIVE_ROOT}/LATEST_MODEL.txt", "w") as f:
     f.write(CT2_OUT + "\n")
 print(f"✅ CT2 model saved to: {CT2_OUT}")

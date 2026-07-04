@@ -1,5 +1,5 @@
 ##### MARKDOWN CELL 1 #####
-# 🎤 Hakha Chin STT — V5 Fresh Training Cycle (Colab)
+# 🎤 Hakha Chin STT — V6 Fresh Training Cycle (Colab)
 
 Run-all, phone-friendly. This trains `whisper-large-v3-turbo` on Hakha Chin
 (cnh) with LoRA and saves **every artifact to Google Drive** so nothing is
@@ -21,7 +21,7 @@ Runtime ▸ **Run all**.
 ##### CODE CELL 2 #####
 # --- 0. Config ---------------------------------------------------------
 SMOKE = False        # True = fast dry run (tiny data, 1 epoch) to test the pipeline
-EPOCHS = 8           # real-run epochs (ignored when SMOKE=True)
+EPOCHS = 10          # max epochs — early stopping usually ends the run sooner
 BRANCH = "claude/latest-result-5kTMp"   # repo branch to pull the code from
 DRIVE_ROOT = "/content/drive/MyDrive/ChinTranslator"
 
@@ -84,7 +84,16 @@ with open(f"{DRIVE_ROOT}/LATEST_MODEL.txt", "w") as f:
 print("\n✅ CT2 model saved to:", CT2_OUT)
 print("   (path also written to", f"{DRIVE_ROOT}/LATEST_MODEL.txt)")
 
-##### MARKDOWN CELL 9 #####
+##### CODE CELL 9 #####
+# --- 6.5 Evaluate on the held-out official test split ------------------
+# 763 clips / 158 speakers the model never trained on. This is the honest
+# accuracy number — compare runs by it, not by eval loss. Published bar to
+# beat on this exact split: ~31.4% WER (wav2vec2-large-xlsr-cnh).
+limit_eval = "--limit 20" if SMOKE else ""
+!python evaluate_model.py --model "{CT2_OUT}" {limit_eval} \
+  --report "{RUN_DIR}/eval_report.json"
+
+##### MARKDOWN CELL 10 #####
 ## ▶️ Serve the fine-tuned model (optional)
 
 Launches the Gradio demo pointed at the CT2 model you just trained. It prints
@@ -93,8 +102,9 @@ a public `*.gradio.live` link you can open from your phone.
 To re-serve in a future session without retraining, just mount Drive and run
 this cell — the path is in `LATEST_MODEL.txt`.
 
-##### CODE CELL 10 #####
+##### CODE CELL 11 #####
 # --- 7. Launch Gradio on the freshly trained model --------------------
 import os
 os.environ["CHIN_MODEL"] = CT2_OUT
 !CHIN_MODEL="{CT2_OUT}" python gradio_interface.py
+

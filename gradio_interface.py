@@ -75,6 +75,31 @@ MODEL = WhisperModel(MODEL_PATH,
                      compute_type="float16" if DEVICE == "cuda" else "int8")
 print("✓ Model loaded.")
 
+
+def chin_lang_token(model_ref):
+    """Surrogate language token the model was trained with (V6+ adapters).
+
+    Whisper has no cnh token, so V6 trains with a fixed stand-in token and the
+    SAME token must be forced at inference — otherwise faster-whisper feeds an
+    auto-detected token (flapping between id/km/ms per utterance), a prompt the
+    model never saw in training. train.py records it in chin_metadata.json and
+    export_model.py copies it into the CT2 dir. Env CHIN_LANG overrides
+    (CHIN_LANG="" forces the old auto-detect). None = V5-era model → auto.
+    """
+    if "CHIN_LANG" in os.environ:
+        return os.environ["CHIN_LANG"] or None
+    meta = Path(model_ref) / "chin_metadata.json"
+    if meta.is_file():
+        try:
+            return json.loads(meta.read_text(encoding="utf-8")).get("language_token")
+        except Exception as e:  # noqa: BLE001
+            print(f"[meta] unreadable chin_metadata.json ({e}); using auto-detect")
+    return None
+
+
+CHIN_LANG_TOKEN = chin_lang_token(MODEL_PATH)
+print(f"  language token: {CHIN_LANG_TOKEN or 'auto-detect (V5-era model)'}")
+
 # ---------------- Core helpers ----------------
 
 def silero_vad_windows(audio_path, sr_target=16000, min_sil_ms=500, pad_ms=140, merge_gap_ms=350):
@@ -186,7 +211,11 @@ def transcribe_file(audio_path,
             u = min(t + max_subwin_s, s1)
             tmp = slice_to_wav(audio_path, t, u)
             try:
-                # First try same-language transcribe
+                # First try same-language transcribe. Force the surrogate
+                # language token the model trained with (V6+); a V6 model
+                # decoded with auto-detect sees a prompt it was never trained
+                # on and loses accuracy utterance-to-utterance.
+                lang_kw = {"language": CHIN_LANG_TOKEN} if CHIN_LANG_TOKEN else {}
                 part, _ = model.transcribe(
                     tmp,
                     task="transcribe",
@@ -195,7 +224,8 @@ def transcribe_file(audio_path,
                     beam_size=5, best_of=5, patience=1.0,
                     temperature=[0.0, 0.2, 0.4],
                     compression_ratio_threshold=2.2,
-                    vad_filter=False
+                    vad_filter=False,
+                    **lang_kw
                 )
                 # faster-whisper returns a ONE-SHOT generator. Materialize it, or
                 # the text scan below exhausts it and the segment loop sees nothing.

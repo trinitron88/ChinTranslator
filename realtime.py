@@ -69,6 +69,27 @@ print("✓ Model loaded.")
 CHIN_CODE = "cnh"
 
 
+def _chin_lang_token(model_ref):
+    """Surrogate language token the model was trained with (V6+ adapters; see
+    train.py). Forcing the training-time token at inference beats auto-detect,
+    which flaps between id/km/ms per utterance. CHIN_LANG env overrides
+    (CHIN_LANG="" → auto-detect). None for V5-era models → old behavior."""
+    if "CHIN_LANG" in os.environ:
+        return os.environ["CHIN_LANG"] or None
+    from pathlib import Path
+    meta = Path(model_ref) / "chin_metadata.json"
+    if meta.is_file():
+        try:
+            return json.loads(meta.read_text(encoding="utf-8")).get("language_token")
+        except Exception as e:  # noqa: BLE001
+            print(f"[meta] unreadable chin_metadata.json ({e}); using auto-detect")
+    return None
+
+
+CHIN_LANG_TOKEN = _chin_lang_token(MODEL_NAME)
+print(f"  language token: {CHIN_LANG_TOKEN or 'auto-detect (V5-era model)'}")
+
+
 # ---------------- Chin → English ----------------
 def to_en(text_chin: str) -> str:
     """Translate Hakha Chin → English via Google's endpoint with the source pinned.
@@ -129,8 +150,9 @@ def on_utterance(audio):
     if sr != 16000:
         samples = librosa.resample(samples, orig_sr=sr, target_sr=16000)
 
+    lang_kw = {"language": CHIN_LANG_TOKEN} if CHIN_LANG_TOKEN else {}
     segs, _ = MODEL.transcribe(samples, task="transcribe", beam_size=5,
-                               vad_filter=False)
+                               vad_filter=False, **lang_kw)
     chin = "".join(s.text for s in segs).strip()
     if not chin:
         return
