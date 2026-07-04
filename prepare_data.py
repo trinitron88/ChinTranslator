@@ -58,7 +58,14 @@ import tarfile  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import librosa  # noqa: E402
-from datasets import Dataset, DatasetDict, Features, Sequence, Value  # noqa: E402
+from datasets import (  # noqa: E402
+    Dataset,
+    DatasetDict,
+    Features,
+    Sequence,
+    Value,
+    concatenate_datasets,
+)
 from huggingface_hub import hf_hub_download  # noqa: E402
 
 # Store decoded 16kHz audio as a plain float32 column (not the HF Audio feature,
@@ -261,14 +268,23 @@ def main():
         "test": test_records,
     }
 
+    # Build each split in CHUNKS: Arrow-encoding a whole split at once blows the
+    # float32 samples up into Python objects (~7x) transiently, which OOM-killed
+    # Colab once the mined `other` clips pushed the train split past ~3 h of
+    # audio. Chunking bounds the spike to ~500 clips at a time.
+    CHUNK = 500
     ds = DatasetDict()
     for name, recs in parts.items():
         if not recs:
             continue
-        ds[name] = Dataset.from_dict({
-            "audio": [a for a, _ in recs],          # 16 kHz float32 arrays
-            "sentence": [s for _, s in recs],
-        }, features=FEATURES)
+        shards = []
+        for i in range(0, len(recs), CHUNK):
+            chunk = recs[i:i + CHUNK]
+            shards.append(Dataset.from_dict({
+                "audio": [a for a, _ in chunk],     # 16 kHz float32 arrays
+                "sentence": [s for _, s in chunk],
+            }, features=FEATURES))
+        ds[name] = concatenate_datasets(shards) if len(shards) > 1 else shards[0]
 
     print(f"\n💾 Saving DatasetDict → {args.out}")
     ds.save_to_disk(args.out)
