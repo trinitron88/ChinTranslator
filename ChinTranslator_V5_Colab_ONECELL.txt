@@ -1,6 +1,6 @@
 # --- 0. Config ---------------------------------------------------------
 SMOKE = False        # True = fast dry run (tiny data, 1 epoch) to test the pipeline
-EPOCHS = 8           # real-run epochs (ignored when SMOKE=True)
+EPOCHS = 10          # max epochs — early stopping usually ends the run sooner
 BRANCH = "claude/latest-result-5kTMp"   # repo branch to pull the code from
 DRIVE_ROOT = "/content/drive/MyDrive/ChinTranslator"
 
@@ -56,6 +56,14 @@ with open(f"{DRIVE_ROOT}/LATEST_MODEL.txt", "w") as f:
     f.write(CT2_OUT + "\n")
 print("\n✅ CT2 model saved to:", CT2_OUT)
 print("   (path also written to", f"{DRIVE_ROOT}/LATEST_MODEL.txt)")
+
+# --- 6.5 Evaluate on the held-out official test split ------------------
+# 763 clips / 158 speakers the model never trained on. This is the honest
+# accuracy number — compare runs by it, not by eval loss. Published bar to
+# beat on this exact split: ~31.4% WER (wav2vec2-large-xlsr-cnh).
+limit_eval = "--limit 20" if SMOKE else ""
+!python evaluate_model.py --model "{CT2_OUT}" {limit_eval} \
+  --report "{RUN_DIR}/eval_report.json"
 
 # --- 7. Launch Gradio on the freshly trained model --------------------
 import os

@@ -91,6 +91,38 @@ def english_asr_model():
 
 CHIN_CODE = "cnh"
 
+
+def _chin_lang_token(model_ref: str):
+    """Surrogate language token the V6+ adapters were trained with (see
+    train.py in the main repo). Whisper has no cnh token, so training fixes a
+    stand-in (e.g. "id") and inference must force the SAME one — auto-detect
+    feeds a different, never-trained prompt per utterance. export_model.py
+    puts chin_metadata.json in the CT2 dir and upload_model.py ships it with
+    the repo. CHIN_LANG env overrides (CHIN_LANG="" → auto-detect). None for
+    V5-era models → old auto-detect behavior."""
+    if "CHIN_LANG" in os.environ:
+        return os.environ["CHIN_LANG"] or None
+    try:
+        from pathlib import Path
+        if Path(model_ref).is_dir():
+            meta_path = Path(model_ref) / "chin_metadata.json"
+            if not meta_path.is_file():
+                return None
+        else:  # HF repo id — the file rides in the model repo
+            from huggingface_hub import hf_hub_download
+            meta_path = hf_hub_download(model_ref, "chin_metadata.json",
+                                        token=os.environ.get("HF_TOKEN") or None)
+        with open(meta_path, encoding="utf-8") as f:
+            return json.load(f).get("language_token")
+    except Exception as e:  # noqa: BLE001
+        print(f"[meta] no chin_metadata.json for {model_ref!r} ({e}); "
+              f"using language auto-detect (V5-era model).", flush=True)
+        return None
+
+
+CHIN_LANG_TOKEN = _chin_lang_token(MODEL_NAME)
+print(f"  cnh ASR language token: {CHIN_LANG_TOKEN or 'auto-detect'}", flush=True)
+
 # Version is defined HERE, in source — the deployed code IS the version. No env
 # override on purpose: a Space variable can't silently pin the build stamp, so
 # the "Build:" you see always equals the code that's running. Bump this when you
@@ -215,7 +247,7 @@ SETTINGS = {"gain": 1.0, "direction": "cnh2en"}
 # TTS language. English→Chin is text-only in practice — gTTS has no Chin voice,
 # so speak() returns None and we just show the transcript.
 DIRECTIONS = {
-    "cnh2en": {"asr_lang": None, "sl": CHIN_CODE, "tl": "en", "tts": "en"},
+    "cnh2en": {"asr_lang": CHIN_LANG_TOKEN, "sl": CHIN_CODE, "tl": "en", "tts": "en"},
     "en2cnh": {"asr_lang": "en", "sl": "en", "tl": CHIN_CODE, "tts": CHIN_CODE},
 }
 
@@ -330,6 +362,17 @@ def on_utterance(audio):
         return
     lang = getattr(info, "language", "") or ""
     lang_prob = getattr(info, "language_probability", 0.0) or 0.0
+    # When the cnh language token is FORCED (V6 models), transcribe() skips
+    # detection and info.language just echoes the forced token — useless for
+    # the English-echo check below. Run detection explicitly in that case.
+    if (SETTINGS["direction"] == "cnh2en" and SKIP_ENGLISH
+            and asr_kwargs.get("language")):
+        try:
+            lang, lang_prob, _ = asr.detect_language(audio=samples)
+        except Exception as e:  # noqa: BLE001
+            lang, lang_prob = "", 0.0
+            print(f"[lang] detect_language unavailable ({e}); "
+                  f"EN-skip check disabled this turn.", flush=True)
     print(f"[lang] dir={SETTINGS['direction']} detected={lang!r} p={lang_prob:.2f}", flush=True)
     # In Chin→English mode, when the input is English we skip only the AUDIO
     # output — this breaks the TTS→mic feedback loop (the English we'd speak

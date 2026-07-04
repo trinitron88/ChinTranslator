@@ -27,6 +27,9 @@ if os.path.exists(CT2_OUT): shutil.rmtree(CT2_OUT)
 subprocess.run(["ct2-transformers-converter", "--model", MERGED, "--output_dir", CT2_OUT,
                 "--copy_files", "tokenizer.json", "preprocessor_config.json",
                 "--quantization", "float16"], check=True)
+# V6: carry the surrogate-language-token metadata so the apps decode correctly
+meta = os.path.join(ADAPTER.split("/checkpoint-")[0], "chin_metadata.json")
+if os.path.isfile(meta): shutil.copy(meta, os.path.join(CT2_OUT, "chin_metadata.json"))
 with open(f"{DRIVE_ROOT}/LATEST_MODEL.txt", "w") as f: f.write(CT2_OUT + "\n")
 print("✅ CT2 model saved to:", CT2_OUT)
 

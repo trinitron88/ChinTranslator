@@ -127,6 +127,18 @@ def main():
 
     to_ct2(args.merged_out, args.ct2_out, args.quantization)
 
+    # Ride the training metadata (surrogate language token etc.) along into the
+    # served model dir, so the apps force the same decoder prompt the adapter
+    # was trained with. V5 adapters have no metadata — that's fine, the apps
+    # fall back to the old auto-detect behavior.
+    meta_src = Path(args.adapter) / "chin_metadata.json"
+    if meta_src.is_file():
+        shutil.copy(meta_src, Path(args.ct2_out) / "chin_metadata.json")
+        print(f"✓ copied chin_metadata.json ({meta_src.read_text().strip()})")
+    else:
+        print("ℹ️  no chin_metadata.json in the adapter (V5-era adapter?) — "
+              "the apps will use language auto-detect as before.")
+
     print("\n✅ Done. Serve it with:")
     print(f"   CHIN_MODEL={args.ct2_out} python gradio_interface.py")
 
