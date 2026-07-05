@@ -127,7 +127,7 @@ print(f"  cnh ASR language token: {CHIN_LANG_TOKEN or 'auto-detect'}", flush=Tru
 # override on purpose: a Space variable can't silently pin the build stamp, so
 # the "Build:" you see always equals the code that's running. Bump this when you
 # ship a change.
-APP_VERSION = "v5.2.0-enasr"
+APP_VERSION = "v6.1-flywheel"  # V6.1 model: 18.9% WER on the CV cnh test split
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
