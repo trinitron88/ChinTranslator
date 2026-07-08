@@ -8,3 +8,8 @@ torch
 huggingface_hub
 noisereduce
 # For DENOISE=df (DeepFilterNet, higher quality), also add: deepfilternet
+# Piper TTS (local, low-latency English; default TTS_BACKEND). If the Space build
+# fails on this (its phonemizer dep can lack a py3.12 wheel), set
+# python_version: "3.11" in this README's frontmatter, or remove this line and
+# the app falls back to gTTS automatically (set TTS_BACKEND=gtts to be explicit).
+piper-tts

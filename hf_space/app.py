@@ -127,7 +127,7 @@ print(f"  cnh ASR language token: {CHIN_LANG_TOKEN or 'auto-detect'}", flush=Tru
 # override on purpose: a Space variable can't silently pin the build stamp, so
 # the "Build:" you see always equals the code that's running. Bump this when you
 # ship a change.
-APP_VERSION = "v5.2.0-enasr"
+APP_VERSION = "v5.3.0-piper"
 print(f"[app] version={APP_VERSION}", flush=True)
 
 # Skip translating/speaking when the input is detected as English. Besides being
@@ -183,6 +183,21 @@ def translate(text: str, sl: str, tl: str) -> str:
     return out or text
 
 
+# --- Text-to-speech ----------------------------------------------------------
+# TTS_BACKEND=piper (default) synthesizes English locally with Piper — no
+# per-phrase network round-trip or MP3 temp file, much lower latency than gTTS,
+# and CPU-light. gTTS is the automatic fallback on ANY Piper failure (dep not
+# installed, model missing, synth error), so the app always boots and speaks.
+# Set TTS_BACKEND=gtts to force the old path. Piper only covers English (cnh→en);
+# Chin has no voice in either backend and stays text-only. speak() caches the
+# result of whichever backend runs.
+#
+# Piper voice: PIPER_MODEL = a local .onnx path (with PIPER_CONFIG or a sibling
+# .onnx.json), else PIPER_VOICE names a voice downloaded from rhasspy/piper-voices.
+TTS_BACKEND = os.environ.get("TTS_BACKEND", "piper").lower()
+PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-lessac-medium")
+_piper = {"voice": None, "tried": False, "warned": False}
+
 # TTS cache: (normalized_text, lang) → (sample_rate, int16 PCM). Only successful
 # audio is cached (never None, so failures / Chin-text-only keep retrying). Store
 # and return COPIES so a consumer can never mutate the cached array.
@@ -190,8 +205,63 @@ _TTS_CACHE_MAX = int(os.environ.get("TTS_CACHE_MAX", "256"))
 _tts_cache = OrderedDict()
 
 
-def _synthesize(text: str, lang: str):
-    """TTS via gTTS. Returns (sr, int16 PCM (1,N)) or None (unsupported lang / fail)."""
+def _load_piper():
+    """Load the Piper voice once (cached). Returns the voice or None (→ gTTS)."""
+    if _piper["tried"]:
+        return _piper["voice"]
+    _piper["tried"] = True
+    try:
+        from piper import PiperVoice
+        pm = os.environ.get("PIPER_MODEL", "").strip()
+        if pm and os.path.isfile(pm):
+            onnx = pm
+            conf = os.environ.get("PIPER_CONFIG", "").strip() or pm + ".json"
+        else:
+            # rhasspy/piper-voices layout: <lang>/<lang_region>/<name>/<quality>/<full>
+            from huggingface_hub import hf_hub_download
+            parts = PIPER_VOICE.split("-")            # e.g. ["en_US","lessac","medium"]
+            base = f"{parts[0].split('_')[0]}/{parts[0]}/{parts[1]}/{parts[2]}/{PIPER_VOICE}"
+            onnx = hf_hub_download("rhasspy/piper-voices", base + ".onnx")
+            conf = hf_hub_download("rhasspy/piper-voices", base + ".onnx.json")
+        _piper["voice"] = PiperVoice.load(onnx, config_path=conf)
+        print(f"✓ Piper voice loaded: {PIPER_VOICE}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[tts] Piper unavailable ({e}); using gTTS.", flush=True)
+        _piper["voice"] = None
+    return _piper["voice"]
+
+
+def _speak_piper(text: str):
+    """English → (sample_rate, int16 PCM (1, N)) via Piper, or None on failure.
+    Handles both the 1.2.x (synthesize_stream_raw → bytes) and 1.3+
+    (synthesize → AudioChunk) APIs."""
+    voice = _load_piper()
+    if voice is None:
+        return None
+    try:
+        raw, sr = b"", None
+        try:  # newer API (piper-tts ≥1.3): iterable of AudioChunk
+            chunks = list(voice.synthesize(text))
+            if chunks and hasattr(chunks[0], "audio_int16_bytes"):
+                raw = b"".join(c.audio_int16_bytes for c in chunks)
+                sr = chunks[0].sample_rate
+        except Exception:
+            raw = b""
+        if not raw:  # older API (piper-tts 1.2.x)
+            raw = b"".join(voice.synthesize_stream_raw(text))
+            sr = voice.config.sample_rate
+        if not raw:
+            return None
+        return sr, np.frombuffer(raw, dtype=np.int16).reshape(1, -1)
+    except Exception as e:  # noqa: BLE001
+        if not _piper["warned"]:
+            print(f"[tts] Piper synth failed ({e}); falling back to gTTS.", flush=True)
+            _piper["warned"] = True
+        return None
+
+
+def _speak_gtts(text: str, lang: str):
+    """TTS via gTTS. Returns (sr, int16 PCM) or None (unsupported lang, e.g. Chin)."""
     try:
         from gtts import gTTS
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
@@ -203,13 +273,24 @@ def _synthesize(text: str, lang: str):
         pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).reshape(1, -1)
         return sr, pcm
     except Exception as e:
-        print(f"[tts] failed for lang={lang!r} ({e}) — showing text only")
+        print(f"[tts] gTTS failed for lang={lang!r} ({e}) — showing text only")
         return None
 
 
+def _synthesize(text: str, lang: str):
+    """Dispatch to a backend: Piper for English when TTS_BACKEND=piper (with gTTS
+    fallback on failure), else gTTS. Returns (sr, int16 PCM) or None."""
+    if TTS_BACKEND == "piper" and lang == "en":
+        out = _speak_piper(text)
+        if out is not None:
+            return out  # else fall through to gTTS
+    return _speak_gtts(text, lang)
+
+
 def speak(text: str, lang: str):
-    """Cached TTS. Returns (sr, int16 PCM) or None (text-only). Caches only
-    successful audio and hands back a copy so the cached array is never mutated."""
+    """Cached TTS. Returns (sr, int16 PCM) or None (text-only). Synthesizes via
+    _synthesize (Piper/gTTS), caches only successful audio, and hands back a copy
+    so the cached array is never mutated."""
     text = (text or "").strip()
     if not text:
         return None
