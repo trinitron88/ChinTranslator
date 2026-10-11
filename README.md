@@ -20,13 +20,14 @@ broader LoRA, best-checkpoint selection, and WER measured on the held-out
 official test split (158 unseen speakers). Rationale and results plan:
 [V6_PLAN.md](V6_PLAN.md).
 
-There are three ways to use the model:
+Available apps and acoustic experiments:
 
 | App | What it does |
 |-----|--------------|
 | `gradio_interface.py` | Batch: upload/record audio → Chin transcript + English translation + spoken English |
 | `realtime.py` | Streaming prototype: phone mic → GPU backend → English in your earbud a few seconds behind the speaker (see [REALTIME.md](REALTIME.md)) |
 | `hf_space/` | The realtime app packaged for Hugging Face Spaces (WebRTC + TURN work there; Colab can't carry WebRTC media) |
+| `mms_realtime.py` | Standalone Meta MMS `cnh` transcription experiment: short browser microphone chunks, no translation/TTS. Setup, noncommercial license, and validation: [MMS_REALTIME.md](MMS_REALTIME.md) |
 
 Translation is Google Translate's endpoint called directly with the source
 pinned to `cnh` (deep-translator's language list lacks Hakha Chin, and
