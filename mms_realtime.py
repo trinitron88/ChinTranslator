@@ -338,10 +338,43 @@ def microphone_routes(engine):
     return [Route("/mms/transcribe", transcribe, methods=["POST"])]
 
 
+TRANSCRIPT_CSS = """
+/* Pair native control colors explicitly; Gradio's dark text otherwise
+   inherits onto the browser's default white textarea background. */
+#mms-transcript, #mms-threshold {
+  --mms-foreground: #111827;
+  --mms-background: #ffffff;
+  --mms-placeholder: #4b5563;
+  --mms-border: #6b7280;
+  color-scheme: light;
+}
+.dark #mms-transcript, .dark #mms-threshold {
+  --mms-foreground: #f3f4f6;
+  --mms-background: #111827;
+  --mms-placeholder: #cbd5e1;
+  --mms-border: #9ca3af;
+  color-scheme: dark;
+}
+#mms-transcript, #mms-transcript:read-only, #mms-transcript:disabled,
+#mms-threshold, #mms-threshold:disabled {
+  color: var(--mms-foreground);
+  -webkit-text-fill-color: var(--mms-foreground);
+  background-color: var(--mms-background);
+  border: 1px solid var(--mms-border);
+  opacity: 1;
+}
+#mms-transcript::placeholder, #mms-threshold::placeholder {
+  color: var(--mms-placeholder);
+  -webkit-text-fill-color: var(--mms-placeholder);
+  opacity: 1;
+}
+"""
+
+
 def build_demo(engine, chunk_seconds=3.0):
     import gradio as gr
 
-    with gr.Blocks(title="Hakha Chin · Meta MMS", js=RECORDER_JS) as demo:
+    with gr.Blocks(title="Hakha Chin · Meta MMS", js=RECORDER_JS, css=TRANSCRIPT_CSS) as demo:
         gr.Markdown(f"# Hakha Chin speech-to-text\n"
                     f"Meta MMS · `cnh` · {engine.device.upper()} · {chunk_seconds:g}-second chunks\n\n"
                     "Use **Start microphone** and **Stop**. Text arrives after each chunk "
@@ -365,7 +398,7 @@ def build_demo(engine, chunk_seconds=3.0):
           <p>Lower values accept quieter audio and more noise. This energy gate cannot identify speech.</p>
           <p id="mms-status" role="status" aria-live="polite">Ready. Allow microphone access, then Start.</p>
           <label for="mms-transcript">Hakha Chin transcript (last 120 chunks)</label>
-          <textarea id="mms-transcript" readonly rows="12" style="width:100%;padding:12px" aria-label="Hakha Chin transcript"></textarea>""")
+          <textarea id="mms-transcript" readonly rows="12" style="width:100%;padding:12px" aria-label="Hakha Chin transcript" placeholder="Transcribed Hakha Chin text will appear here."></textarea>""")
     return demo
 
 
