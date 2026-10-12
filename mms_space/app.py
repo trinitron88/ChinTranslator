@@ -27,7 +27,7 @@ from mms_translation import EnglishTranslator, translation_routes
 HOSTING_NOTICE = """
 **Hosted experiment:** This version processes microphone audio on the Hugging
 Face Space's server. It uses CPU inference and may fall behind live speech.
-It attempts English translation of the latest four transcribed chunks after Stop.
+It attempts English translation of each transcription chunk as it arrives, while recording continues.
 It does not generate speech. Transcription and translation accuracy have not been evaluated. Start with a short, consented, non-sensitive test.
 
 **Privacy on this host:** Audio leaves your device over HTTPS and goes to this

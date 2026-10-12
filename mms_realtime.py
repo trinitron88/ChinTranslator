@@ -176,58 +176,113 @@ RECORDER_JS = r"""() => {
     let context, source, processor, muted, microphone, recording = false;
     let pending, filled = 0, received = 0, generation = 0, rows = [];
     let queue = [], sending = false, controller, captureNotice = '';
-    // Translation is optional and runs only after capture + ASR have stopped.
+    // ASR and translation drain independently, one request at a time each.
     const english = document.getElementById('mms-english');
     const englishStatus = document.getElementById('mms-english-status');
     const translateButton = document.getElementById('mms-translate');
-    let translationGeneration = 0, translationController, translatedSource = '';
+    let translationGeneration = 0, translationController, translationSending = false;
+    let translationQueue = [], englishRows = [];
+    const maxWaitingTranslations = 8;
+    function renderEnglish() {
+      if (!english) return;
+      english.value = englishRows.map(row => {
+        let text = row.text;
+        if (row.state === 'queued') text = 'Waiting for English translation…';
+        if (row.state === 'translating') text = 'Translating to English…';
+        if (row.state === 'failed') text = `Translation failed: ${row.error}`;
+        return `[${stamp(row.start)}–${stamp(row.end)}] ${text}`;
+      }).join('\n\n');
+      english.scrollTop = english.scrollHeight;
+      const failed = englishRows.filter(row => row.state === 'failed').length;
+      englishStatus.textContent = translationSending ?
+        `Translating on CPU; ${translationQueue.length} chunks waiting. First use loads the model…` :
+        (recording || sending ? 'English appears as each transcription chunk is translated.' :
+          (englishRows.length ? 'English translation queue finished.' : 'Ready for live English translation.'));
+      if (failed) englishStatus.textContent += ` ${failed} failed chunks; use Retry English. Original transcript preserved.`;
+      translateButton.disabled = translationSending || translationQueue.length > 0 || !failed;
+    }
     function resetEnglish() {
       ++translationGeneration;
       if (translationController) translationController.abort();
-      translationController = null; translatedSource = '';
-      if (english) {
-        english.value = '';
-        englishStatus.textContent = 'English will be attempted after Stop finishes transcription.';
-        translateButton.disabled = true;
-      }
+      translationController = null; translationSending = false;
+      translationQueue = []; englishRows = [];
+      renderEnglish();
     }
-    async function translateEnglish() {
-      if (!english || recording || sending || queue.length) return;
-      const excerpt = rows.slice(-4);
-      if (!excerpt.length) return;
-      const source = excerpt.map(row => row.split('\n')[0].replace(/^\[[^\]]+\] /, '')).join(' ');
-      if (source === translatedSource || translationController) return;
-      const firstRange = excerpt[0].match(/^\[([^\]]+)\]/)?.[1];
-      const lastRange = excerpt[excerpt.length - 1].match(/^\[([^\]]+)\]/)?.[1];
-      const version = ++translationGeneration;
-      const pendingTranslation = new AbortController();
-      translationController = pendingTranslation;
-      translateButton.disabled = true;
-      englishStatus.textContent = 'Attempting English translation on CPU; first use loads the model…';
+    async function drainEnglish() {
+      if (!english || translationSending || !translationQueue.length) return;
+      const version = translationGeneration;
+      translationSending = true;
       try {
-        const response = await fetch('mms/translate', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({text: source}), signal: pendingTranslation.signal
-        });
-        const result = await response.json();
-        if (version !== translationGeneration) return;
-        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-        translatedSource = source;
-        english.value = result.text || '';
-        englishStatus.textContent = `Unverified English attempt for ${excerpt.length} latest chunks (${firstRange} through ${lastRange}); ${result.latency.toFixed(2)} s decode.`;
-        if (result.truncated) englishStatus.textContent += ' Output reached its length limit and may be incomplete.';
-        if (!result.text) englishStatus.textContent += ' No English text was produced.';
-      } catch (error) {
-        if (version === translationGeneration && error.name !== 'AbortError')
-          englishStatus.textContent = `Translation failed: ${error.message} Original transcript preserved; use Retry English.`;
+        while (version === translationGeneration && translationQueue.length) {
+          const row = translationQueue.shift();
+          const pendingTranslation = new AbortController();
+          translationController = pendingTranslation;
+          row.state = 'translating';
+          renderEnglish();
+          try {
+            // Another browser (or cancelled server inference) can hold the
+            // translator lock. Retry briefly, then leave this row retryable.
+            for (let attempt = 0; ; attempt++) {
+              const response = await fetch('mms/translate', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text: row.source}), signal: pendingTranslation.signal
+              });
+              const result = await response.json();
+              if (version !== translationGeneration) return;
+              if (response.status === 429 && attempt < 3) {
+                await new Promise(resolve => {
+                  const done = () => {
+                    clearTimeout(timer);
+                    pendingTranslation.signal.removeEventListener('abort', done);
+                    resolve();
+                  };
+                  const timer = setTimeout(done, 1000 * (2 ** attempt));
+                  pendingTranslation.signal.addEventListener('abort', done, {once: true});
+                });
+                if (version !== translationGeneration) return;
+                continue;
+              }
+              if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+              if (!result.text?.trim()) throw new Error('No English text was produced.');
+              row.state = 'done';
+              row.text = `${result.text}\n  Translation latency: ${result.latency.toFixed(2)} s`;
+              if (result.truncated) row.text += '; output reached its length limit and may be incomplete.';
+              break;
+            }
+          } catch (error) {
+            if (version !== translationGeneration) return;
+            row.state = 'failed'; row.error = error.message;
+          }
+          renderEnglish();
+        }
       } finally {
         if (version === translationGeneration) {
-          translationController = null;
-          translateButton.disabled = recording || sending || queue.length > 0;
+          translationController = null; translationSending = false;
+          renderEnglish();
         }
       }
     }
-    if (translateButton) translateButton.onclick = () => { translatedSource = ''; translateEnglish(); };
+    function enqueueEnglish(chunk, text) {
+      if (!english) return;
+      const row = {start: chunk.start, end: chunk.end, source: text, state: 'queued'};
+      englishRows.push(row); englishRows = englishRows.slice(-120);
+      translationQueue.push(row);
+      drainEnglish();
+      // Bound the backlog without dropping accepted transcripts: stop capture,
+      // flush its partial window, then finish both queues (including queued ASR).
+      if (recording && translationQueue.length >= maxWaitingTranslations) {
+        captureNotice = 'Capture stopped: English translation cannot keep up. Captured audio and queued translations will finish.';
+        finishCapture();
+      }
+      renderEnglish();
+    }
+    if (translateButton) translateButton.onclick = () => {
+      if (translationSending || translationQueue.length) return;
+      for (const row of englishRows.filter(row => row.state === 'failed')) {
+        row.state = 'queued'; translationQueue.push(row);
+      }
+      drainEnglish();
+    };
     const stamp = value => `${String(Math.floor(value / 60)).padStart(2, '0')}:${(value % 60).toFixed(2).padStart(5, '0')}`;
     function finishCapture(flush = true) {
       recording = false;
@@ -236,7 +291,9 @@ RECORDER_JS = r"""() => {
       if (muted) muted.disconnect();
       if (microphone) microphone.getTracks().forEach(track => track.stop());
       if (context) { context.close(); context = null; }
-      if (flush && filled) enqueue(pending.slice(0, filled));
+      // Reserve one extra slot for the final partial window, even when all
+      // eight regular ASR queue slots are occupied at Stop/backpressure.
+      if (flush && filled) enqueue(pending.slice(0, filled), true);
       filled = 0;
       start.disabled = sending || queue.length > 0;
       stop.disabled = true;
@@ -263,6 +320,7 @@ RECORDER_JS = r"""() => {
               rows = rows.slice(-120);
               transcript.value = rows.join('\n\n');
               transcript.scrollTop = transcript.scrollHeight;
+              enqueueEnglish(chunk, result.text);
             }
             status.textContent = result.skipped ? 'Silent/quiet or very short chunk skipped; no inference.' :
               `Decoded in ${result.latency.toFixed(2)} s. ${queue.length} chunks waiting.`;
@@ -283,12 +341,12 @@ RECORDER_JS = r"""() => {
         if (!recording) {
           start.disabled = false;
           if (!status.textContent.includes('error')) status.textContent = 'Stopped. ' + status.textContent;
-          translateEnglish();
         }
+        renderEnglish();
       }
     }
-    function enqueue(samples) {
-      if (queue.length >= 8) {
+    function enqueue(samples, finalPartial = false) {
+      if (queue.length >= 8 && !finalPartial) {
         finishCapture(false);
         captureNotice = 'Capture stopped: backend cannot keep up. Remaining microphone audio was dropped; queued chunks will finish.';
         status.textContent = captureNotice;
@@ -342,6 +400,7 @@ RECORDER_JS = r"""() => {
         source.connect(processor); processor.connect(muted); muted.connect(context.destination);
         recording = true; stop.disabled = false;
         status.textContent = 'Listening. Stop sends the final captured partial chunk.';
+        renderEnglish();
       } catch (error) {
         if (newContext && newContext !== context) newContext.close();
         if (currentGeneration !== generation) return;
@@ -349,13 +408,14 @@ RECORDER_JS = r"""() => {
         status.textContent = `Microphone error: ${error.message}`;
       }
     };
-    stop.onclick = () => { finishCapture(); status.textContent = sending ? 'Stopped. Finishing pending chunks...' : 'Stopped.'; translateEnglish(); };
+    stop.onclick = () => { finishCapture(); status.textContent = sending ? 'Stopped. Finishing pending chunks...' : 'Stopped.'; renderEnglish(); };
     clear.onclick = () => {
       resetEnglish();
       ++generation; finishCapture(false); queue = [];
       if (controller) controller.abort();
       rows = []; transcript.value = ''; captureNotice = ''; status.textContent = 'Cleared. Start for a new session.';
       start.disabled = sending;
+      renderEnglish();
     };
     window.addEventListener('pagehide', () => { resetEnglish(); ++generation; finishCapture(false); if (controller) controller.abort(); });
   };
@@ -473,14 +533,16 @@ def build_demo(engine, chunk_seconds=3.0, *, english_translation=False):
         if english_translation:
             gr.HTML("""<section aria-label="Experimental English translation">
               <h2>English attempt — unverified</h2>
-              <p>After you press Stop and transcription finishes, the latest four transcribed chunks
-              are translated together. Longer sessions show only this recent excerpt. Transcription
+              <p>Each transcription chunk is sent for English translation as it arrives, while the
+              microphone keeps recording. English appears below in timestamp order. Transcription
               mistakes can produce misleading English; verify with a Hakha Chin speaker.</p>
-              <label for="mms-english">Attempted English translation (latest 4 chunks)</label>
+              <label for="mms-english">Attempted English translation (last 120 chunks)</label>
               <textarea id="mms-english" readonly rows="6" style="width:100%;padding:12px"
-                aria-label="Attempted English translation" placeholder="Attempted English translation will appear here after Stop."></textarea>
-              <p id="mms-english-status" role="status" aria-live="polite">English will be attempted after Stop finishes transcription.</p>
+                aria-label="Attempted English translation" placeholder="English translation will appear here as transcription chunks arrive."></textarea>
+              <p id="mms-english-status" role="status" aria-live="polite">Ready for live English translation.</p>
               <button id="mms-translate" disabled style="padding:12px">Retry English</button>
+              <p>Stop finishes captured audio and queued translations. If eight translations are waiting,
+              capture stops automatically so processing can catch up. First use loads the translation model.</p>
               <p>MADLAD-400 3B runs on this same CPU server. No transcript is sent to a separate translation service.
               Model: <a href="https://huggingface.co/google/madlad400-3b-mt">Google MADLAD-400</a>, Apache 2.0;
               <a href="https://huggingface.co/Heng666/madlad400-3b-mt-ct2-int8">INT8 conversion by Heng-Shiou Sheu</a>.</p>

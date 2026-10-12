@@ -13,17 +13,28 @@ license: cc-by-nc-4.0
 
 # Hakha Chin transcription with an experimental English attempt
 
-CPU Basic demo: Meta MMS `cnh` speech recognition, then an attempted English
+CPU Basic demo: Meta MMS `cnh` speech recognition, with streaming English
 translation using MADLAD-400 3B INT8 on the same server. No paid inference API,
 new credentials, or hardware provisioning is used.
 
-Record a short sample, then press **Stop**. The full retained Hakha Chin
-transcript stays in the first box. Once pending audio finishes, the second box
-translates the **latest four nonempty transcript chunks together**, not the whole
-recording. Translation waits for Stop to avoid competing with active capture.
-Use **Retry English** after a translation error. Clear resets both boxes;
-new sessions discard stale translation responses. An already running server
-translation may finish after cancellation, but its result is ignored.
+Press **Start microphone**. Each nonempty Hakha Chin transcript chunk is sent
+to translation immediately, while recording and transcription continue. The
+second box shows each chunk's English attempt with matching timestamps, in
+recording order. Both boxes retain the latest 120 nonempty chunks; pending and
+failed translations are labeled. **Stop** flushes the final partial audio
+chunk and lets both queues finish, without translating earlier chunks again.
+
+Translation requests run one at a time independently of transcription. If
+eight translations are waiting, capture stops automatically with a visible
+notice; captured audio and queued translations still finish. This keeps slow
+CPU decoding or first-use model loading from creating an unlimited backlog.
+Busy responses get up to three automatic retries (after 1, 2, and 4 seconds).
+Use **Retry English** to retry failed retained chunks after the queue finishes;
+successful translations stay in place. Clear resets both boxes and queues;
+starting a new session also discards pending translations and ignores stale
+responses. An already running server translation may finish after cancellation,
+but its result is ignored. Wait for the English queue to finish before starting
+again if you want all translations from the current recording.
 
 Both speech recognition and translation are **unverified for conversational
 Hakha Chin**. Fluent English can be wrong, particularly when the transcript is

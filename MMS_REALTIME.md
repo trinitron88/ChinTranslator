@@ -5,7 +5,11 @@
 Hakha Chin (`cnh`) language adapter. It listens to the browser microphone,
 transcribes fixed chunks of 2–5 seconds (default: 3 seconds), and displays the
 last 120 nonempty transcript rows. It does not translate to English or
-generate speech.
+generate speech when launched directly. The hosted entrypoint in `mms_space/`
+also translates each nonempty transcription chunk to English with MADLAD-400
+as soon as it arrives, using a separate serial queue while recording continues.
+Stop flushes the final audio chunk and lets both queues finish. See
+[mms_space/README.md](mms_space/README.md) for streaming, retry, and backlog behavior.
 The existing Whisper/V6 apps, training pipeline, and Space remain separate.
 
 This is chunked CTC inference, not a continuously updating decoder. Words at

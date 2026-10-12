@@ -27,11 +27,12 @@ Available apps and acoustic experiments:
 | `gradio_interface.py` | Batch: upload/record audio → Chin transcript + English translation + spoken English |
 | `realtime.py` | Streaming prototype: phone mic → GPU backend → English in your earbud a few seconds behind the speaker (see [REALTIME.md](REALTIME.md)) |
 | `hf_space/` | The realtime app packaged for Hugging Face Spaces (WebRTC + TURN work there; Colab can't carry WebRTC media) |
-| `mms_realtime.py` | Standalone Meta MMS `cnh` transcription experiment: short browser microphone chunks, no translation/TTS. Setup, noncommercial license, and validation: [MMS_REALTIME.md](MMS_REALTIME.md) |
+| `mms_realtime.py` / `mms_space/` | Meta MMS `cnh` microphone transcription; the MMS Space translates each chunk to English as it arrives. See [MMS_REALTIME.md](MMS_REALTIME.md) and [MMS Space setup](mms_space/README.md). |
 
-Translation is Google Translate's endpoint called directly with the source
+The Whisper apps use Google Translate's endpoint called directly with the source
 pinned to `cnh` (deep-translator's language list lacks Hakha Chin, and
-autodetect misreads it). TTS is gTTS.
+autodetect misreads it). TTS is gTTS. The MMS Space uses Meta MMS for transcription
+and local MADLAD-400 for English translation, with no spoken output.
 
 ## 🚀 Quick start
 
