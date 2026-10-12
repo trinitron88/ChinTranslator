@@ -175,6 +175,58 @@ RECORDER_JS = r"""() => {
     let context, source, processor, muted, microphone, recording = false;
     let pending, filled = 0, received = 0, generation = 0, rows = [];
     let queue = [], sending = false, controller, captureNotice = '';
+    // Translation is optional and runs only after capture + ASR have stopped.
+    const english = document.getElementById('mms-english');
+    const englishStatus = document.getElementById('mms-english-status');
+    const translateButton = document.getElementById('mms-translate');
+    let translationGeneration = 0, translationController, translatedSource = '';
+    function resetEnglish() {
+      ++translationGeneration;
+      if (translationController) translationController.abort();
+      translationController = null; translatedSource = '';
+      if (english) {
+        english.value = '';
+        englishStatus.textContent = 'English will be attempted after Stop finishes transcription.';
+        translateButton.disabled = true;
+      }
+    }
+    async function translateEnglish() {
+      if (!english || recording || sending || queue.length) return;
+      const excerpt = rows.slice(-4);
+      if (!excerpt.length) return;
+      const source = excerpt.map(row => row.split('\n')[0].replace(/^\[[^\]]+\] /, '')).join(' ');
+      if (source === translatedSource || translationController) return;
+      const firstRange = excerpt[0].match(/^\[([^\]]+)\]/)?.[1];
+      const lastRange = excerpt[excerpt.length - 1].match(/^\[([^\]]+)\]/)?.[1];
+      const version = ++translationGeneration;
+      const pendingTranslation = new AbortController();
+      translationController = pendingTranslation;
+      translateButton.disabled = true;
+      englishStatus.textContent = 'Attempting English translation on CPU; first use loads the model…';
+      try {
+        const response = await fetch('mms/translate', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text: source}), signal: pendingTranslation.signal
+        });
+        const result = await response.json();
+        if (version !== translationGeneration) return;
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        translatedSource = source;
+        english.value = result.text || '';
+        englishStatus.textContent = `Unverified English attempt for ${excerpt.length} latest chunks (${firstRange} through ${lastRange}); ${result.latency.toFixed(2)} s decode.`;
+        if (result.truncated) englishStatus.textContent += ' Output reached its length limit and may be incomplete.';
+        if (!result.text) englishStatus.textContent += ' No English text was produced.';
+      } catch (error) {
+        if (version === translationGeneration && error.name !== 'AbortError')
+          englishStatus.textContent = `Translation failed: ${error.message} Original transcript preserved; use Retry English.`;
+      } finally {
+        if (version === translationGeneration) {
+          translationController = null;
+          translateButton.disabled = recording || sending || queue.length > 0;
+        }
+      }
+    }
+    if (translateButton) translateButton.onclick = () => { translatedSource = ''; translateEnglish(); };
     const stamp = value => `${String(Math.floor(value / 60)).padStart(2, '0')}:${(value % 60).toFixed(2).padStart(5, '0')}`;
     function finishCapture(flush = true) {
       recording = false;
@@ -230,6 +282,7 @@ RECORDER_JS = r"""() => {
         if (!recording) {
           start.disabled = false;
           if (!status.textContent.includes('error')) status.textContent = 'Stopped. ' + status.textContent;
+          translateEnglish();
         }
       }
     }
@@ -250,6 +303,7 @@ RECORDER_JS = r"""() => {
     start.onclick = async () => {
       if (recording || sending || queue.length) return;
       start.disabled = true;
+      resetEnglish();
       const currentGeneration = ++generation;
       let newContext, newMicrophone;
       try {
@@ -294,14 +348,15 @@ RECORDER_JS = r"""() => {
         status.textContent = `Microphone error: ${error.message}`;
       }
     };
-    stop.onclick = () => { finishCapture(); status.textContent = sending ? 'Stopped. Finishing pending chunks...' : 'Stopped.'; };
+    stop.onclick = () => { finishCapture(); status.textContent = sending ? 'Stopped. Finishing pending chunks...' : 'Stopped.'; translateEnglish(); };
     clear.onclick = () => {
+      resetEnglish();
       ++generation; finishCapture(false); queue = [];
       if (controller) controller.abort();
       rows = []; transcript.value = ''; captureNotice = ''; status.textContent = 'Cleared. Start for a new session.';
       start.disabled = sending;
     };
-    window.addEventListener('pagehide', () => { ++generation; finishCapture(false); if (controller) controller.abort(); });
+    window.addEventListener('pagehide', () => { resetEnglish(); ++generation; finishCapture(false); if (controller) controller.abort(); });
   };
   bind();
 }"""
@@ -341,14 +396,14 @@ def microphone_routes(engine):
 TRANSCRIPT_CSS = """
 /* Pair native control colors explicitly; Gradio's dark text otherwise
    inherits onto the browser's default white textarea background. */
-#mms-transcript, #mms-threshold {
+#mms-transcript, #mms-english, #mms-threshold {
   --mms-foreground: #111827;
   --mms-background: #ffffff;
   --mms-placeholder: #4b5563;
   --mms-border: #6b7280;
   color-scheme: light;
 }
-.dark #mms-transcript, .dark #mms-threshold {
+.dark #mms-transcript, .dark #mms-english, .dark #mms-threshold {
   --mms-foreground: #f3f4f6;
   --mms-background: #111827;
   --mms-placeholder: #cbd5e1;
@@ -356,6 +411,7 @@ TRANSCRIPT_CSS = """
   color-scheme: dark;
 }
 #mms-transcript, #mms-transcript:read-only, #mms-transcript:disabled,
+#mms-english, #mms-english:read-only, #mms-english:disabled,
 #mms-threshold, #mms-threshold:disabled {
   color: var(--mms-foreground);
   -webkit-text-fill-color: var(--mms-foreground);
@@ -363,7 +419,7 @@ TRANSCRIPT_CSS = """
   border: 1px solid var(--mms-border);
   opacity: 1;
 }
-#mms-transcript::placeholder, #mms-threshold::placeholder {
+#mms-transcript::placeholder, #mms-english::placeholder, #mms-threshold::placeholder {
   color: var(--mms-placeholder);
   -webkit-text-fill-color: var(--mms-placeholder);
   opacity: 1;
@@ -371,7 +427,7 @@ TRANSCRIPT_CSS = """
 """
 
 
-def build_demo(engine, chunk_seconds=3.0):
+def build_demo(engine, chunk_seconds=3.0, *, english_translation=False):
     import gradio as gr
 
     with gr.Blocks(title="Hakha Chin · Meta MMS", js=RECORDER_JS, css=TRANSCRIPT_CSS) as demo:
@@ -399,6 +455,21 @@ def build_demo(engine, chunk_seconds=3.0):
           <p id="mms-status" role="status" aria-live="polite">Ready. Allow microphone access, then Start.</p>
           <label for="mms-transcript">Hakha Chin transcript (last 120 chunks)</label>
           <textarea id="mms-transcript" readonly rows="12" style="width:100%;padding:12px" aria-label="Hakha Chin transcript" placeholder="Transcribed Hakha Chin text will appear here."></textarea>""")
+        if english_translation:
+            gr.HTML("""<section aria-label="Experimental English translation">
+              <h2>English attempt — unverified</h2>
+              <p>After you press Stop and transcription finishes, the latest four transcribed chunks
+              are translated together. Longer sessions show only this recent excerpt. Transcription
+              mistakes can produce misleading English; verify with a Hakha Chin speaker.</p>
+              <label for="mms-english">Attempted English translation (latest 4 chunks)</label>
+              <textarea id="mms-english" readonly rows="6" style="width:100%;padding:12px"
+                aria-label="Attempted English translation" placeholder="Attempted English translation will appear here after Stop."></textarea>
+              <p id="mms-english-status" role="status" aria-live="polite">English will be attempted after Stop finishes transcription.</p>
+              <button id="mms-translate" disabled style="padding:12px">Retry English</button>
+              <p>MADLAD-400 3B runs on this same CPU server. No transcript is sent to a separate translation service.
+              Model: <a href="https://huggingface.co/google/madlad400-3b-mt">Google MADLAD-400</a>, Apache 2.0;
+              <a href="https://huggingface.co/Heng666/madlad400-3b-mt-ct2-int8">INT8 conversion by Heng-Shiou Sheu</a>.</p>
+            </section>""")
     return demo
 
 

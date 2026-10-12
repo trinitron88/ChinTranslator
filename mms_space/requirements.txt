@@ -1,0 +1,12 @@
+# Hugging Face Spaces runs this on Linux x86-64 / Python 3.12.
+# Explicit +cpu avoids installing PyTorch's large CUDA dependency set.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+transformers==4.49.0
+huggingface-hub==0.29.3
+gradio==5.23.1
+numpy==1.26.4
+scipy==1.14.1
+soundfile==0.13.1
+ctranslate2==4.6.3
+sentencepiece==0.2.1
