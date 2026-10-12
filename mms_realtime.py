@@ -164,6 +164,7 @@ RECORDER_JS = r"""() => {
   const bind = () => {
     const start = document.getElementById('mms-start');
     if (!start) { requestAnimationFrame(bind); return; }
+    if (start.dataset.english === 'true' && !document.getElementById('mms-english')) { requestAnimationFrame(bind); return; }
     if (start.dataset.bound) return;
     start.dataset.bound = 'true';
     const stop = document.getElementById('mms-stop');
@@ -403,7 +404,21 @@ TRANSCRIPT_CSS = """
   --mms-border: #6b7280;
   color-scheme: light;
 }
-.dark #mms-transcript, .dark #mms-english, .dark #mms-threshold {
+.dark #mms-transcript {
+  --mms-foreground: #f3f4f6;
+  --mms-background: #111827;
+  --mms-placeholder: #cbd5e1;
+  --mms-border: #9ca3af;
+  color-scheme: dark;
+}
+.dark #mms-english {
+  --mms-foreground: #f3f4f6;
+  --mms-background: #111827;
+  --mms-placeholder: #cbd5e1;
+  --mms-border: #9ca3af;
+  color-scheme: dark;
+}
+.dark #mms-threshold {
   --mms-foreground: #f3f4f6;
   --mms-background: #111827;
   --mms-placeholder: #cbd5e1;
@@ -447,7 +462,7 @@ def build_demo(engine, chunk_seconds=3.0, *, english_translation=False):
                     "Clear discards waiting browser chunks and ignores results from an in-progress request. "
                     "A share URL routes traffic through Gradio's public tunnel. Record only with consent.")
         gr.HTML(f"""<div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0">
-          <button id="mms-start" data-seconds="{chunk_seconds}" style="padding:14px">Start microphone</button>
+          <button id="mms-start" data-seconds="{chunk_seconds}" data-english="{str(english_translation).lower()}" style="padding:14px">Start microphone</button>
           <button id="mms-stop" disabled style="padding:14px">Stop</button>
           <button id="mms-clear" style="padding:14px">Clear / reset</button></div>
           <label>Silence gate (dBFS): <input id="mms-threshold" type="number" min="-60" max="-20" value="-45" /></label>
